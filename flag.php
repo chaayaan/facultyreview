@@ -1,54 +1,65 @@
 <?php
 // ============================================================
 //  FacultyReview — flag.php
-//  AJAX-only endpoint. Called by course_detail.php via fetch().
-//  Sets is_flagged = 1 on a review. One flag per user is enough
-//  to surface it in the admin moderation queue.
-//  Returns JSON — no HTML output.
+//  AJAX endpoint. POST only. Returns JSON.
+//  Sets is_flagged = 1. Idempotent — safe to call multiple times.
+//  Guards: must be logged in, review must be approved, cannot flag own review.
 // ============================================================
 require_once 'db.php';
 
+if (session_status() === PHP_SESSION_NONE) session_start();
 header('Content-Type: application/json');
 
-if (session_status() === PHP_SESSION_NONE) session_start();
+function jsonOut(array $data): void {
+    echo json_encode($data);
+    exit;
+}
+
 if (empty($_SESSION['user_id'])) {
     http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Not logged in']);
-    exit;
+    jsonOut(['success' => false, 'message' => 'You must be logged in to flag a review.']);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['success' => false, 'error' => 'Method not allowed']);
-    exit;
+    jsonOut(['success' => false, 'message' => 'Invalid request method.']);
+}
+
+// CSRF check (without die() — we want a JSON response, not raw text)
+if (
+    empty($_POST['csrf_token']) ||
+    empty($_SESSION['csrf_token']) ||
+    !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])
+) {
+    http_response_code(403);
+    jsonOut(['success' => false, 'message' => 'Invalid request. Please refresh the page and try again.']);
 }
 
 $userId   = (int)$_SESSION['user_id'];
 $reviewId = (int)($_POST['review_id'] ?? 0);
 
 if (!$reviewId) {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'error' => 'Invalid review id']);
-    exit;
+    jsonOut(['success' => false, 'message' => 'Invalid review.']);
 }
 
-// Only flag approved reviews; prevent users from flagging their own
-$stmt = $mysqli->prepare("
-    SELECT id FROM reviews
-    WHERE id = ? AND is_approved = 1 AND user_id != ?
-");
-$stmt->bind_param('ii', $reviewId, $userId);
+// ── Guard: review must exist, be approved, and not belong to this user ──
+$stmt = $mysqli->prepare("SELECT user_id, is_approved FROM reviews WHERE id = ?");
+$stmt->bind_param('i', $reviewId);
 $stmt->execute();
-if (!$stmt->get_result()->fetch_assoc()) {
-    echo json_encode(['success' => false, 'error' => 'Cannot flag this review']);
-    exit;
-}
+$review = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Mark flagged (idempotent — safe to call multiple times)
+if (!$review || (int)$review['is_approved'] !== 1) {
+    jsonOut(['success' => false, 'message' => 'This review is not available to flag.']);
+}
+if ((int)$review['user_id'] === $userId) {
+    jsonOut(['success' => false, 'message' => 'You cannot flag your own review.']);
+}
+
+// ── Idempotent flag — safe to call multiple times ──
 $stmt = $mysqli->prepare("UPDATE reviews SET is_flagged = 1 WHERE id = ?");
 $stmt->bind_param('i', $reviewId);
 $stmt->execute();
 $stmt->close();
 
-echo json_encode(['success' => true]);
+jsonOut(['success' => true]);

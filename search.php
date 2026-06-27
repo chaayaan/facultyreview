@@ -1,323 +1,180 @@
 <?php
 // ============================================================
 //  FacultyReview — search.php
-//  Full-text search across courses and professors.
-//  Filters: department, result type (course / professor / all).
+//  Single search bar searches courses AND teachers simultaneously.
+//  GET method (?q=keyword). No AJAX — results render on submit.
 // ============================================================
 require_once 'db.php';
 requireLogin();
 
-$userName = $_SESSION['user_name'];
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-$query  = trim($_GET['q']    ?? '');
-$type   = $_GET['type']      ?? 'all';   // all | course | professor
-$deptId = (int)($_GET['dept'] ?? 0);
-$page   = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 10;
-$offset  = ($page - 1) * $perPage;
-
-if (!in_array($type, ['all', 'course', 'professor'])) $type = 'all';
-
-$departments = $mysqli->query("SELECT id, name FROM departments ORDER BY name")->fetch_all(MYSQLI_ASSOC);
-
-$courseResults    = [];
-$professorResults = [];
-$totalCourses     = 0;
-$totalProfessors  = 0;
+$query = trim($_GET['q'] ?? '');
+$courses = [];
+$teachers = [];
 
 if ($query !== '') {
-    $like = '%' . $mysqli->real_escape_string($query) . '%';
+    $like = '%' . $query . '%';
 
-    // ── Course search ──────────────────────────────────────────
-    if ($type === 'all' || $type === 'course') {
-        $deptWhere = $deptId > 0 ? "AND c.department_id = $deptId" : '';
+    // ── Courses: match code or name ──
+    $stmt = $mysqli->prepare("
+        SELECT
+            c.id, c.code, c.name, c.semester, c.credit,
+            ROUND(AVG(r.rating_overall),  1) AS avg_overall,
+            ROUND(AVG(r.rating_teaching), 1) AS avg_teaching,
+            ROUND(AVG(r.rating_workload), 1) AS avg_workload,
+            ROUND(AVG(r.rating_grading),  1) AS avg_grading,
+            COUNT(DISTINCT r.id) AS review_count
+        FROM courses c
+        LEFT JOIN reviews r ON r.course_id = c.id AND r.is_approved = 1
+        WHERE c.code LIKE ? OR c.name LIKE ?
+        GROUP BY c.id
+        ORDER BY c.code ASC
+    ");
+    $stmt->bind_param('ss', $like, $like);
+    $stmt->execute();
+    $courses = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
 
-        $countStmt = $mysqli->prepare("
-            SELECT COUNT(*) AS c
-            FROM courses c
-            WHERE (c.code LIKE ? OR c.title LIKE ?) $deptWhere
-        ");
-        $countStmt->bind_param('ss', $like, $like);
-        $countStmt->execute();
-        $totalCourses = $countStmt->get_result()->fetch_assoc()['c'];
-        $countStmt->close();
-
-        // Pagination only applies when viewing single type
-        $courseLimit  = ($type === 'course') ? $perPage : 5;
-        $courseOffset = ($type === 'course') ? $offset  : 0;
-
-        $stmt = $mysqli->prepare("
-            SELECT c.id, c.code, c.title, c.credit_hours,
-                   d.name AS dept_name,
-                   ROUND(AVG(r.rating_overall), 1) AS avg_rating,
-                   COUNT(DISTINCT r.id) AS review_count
-            FROM courses c
-            LEFT JOIN departments d ON d.id = c.department_id
-            LEFT JOIN reviews r ON r.course_id = c.id AND r.is_approved = 1
-            WHERE (c.code LIKE ? OR c.title LIKE ?) $deptWhere
-            GROUP BY c.id
-            ORDER BY c.code ASC
-            LIMIT $courseLimit OFFSET $courseOffset
-        ");
-        $stmt->bind_param('ss', $like, $like);
-        $stmt->execute();
-        $courseResults = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $stmt->close();
-    }
-
-    // ── Professor search ───────────────────────────────────────
-    if ($type === 'all' || $type === 'professor') {
-        $deptWhere = $deptId > 0 ? "AND p.department_id = $deptId" : '';
-
-        $countStmt = $mysqli->prepare("
-            SELECT COUNT(*) AS c
-            FROM professors p
-            WHERE p.name LIKE ? $deptWhere
-        ");
-        $countStmt->bind_param('s', $like);
-        $countStmt->execute();
-        $totalProfessors = $countStmt->get_result()->fetch_assoc()['c'];
-        $countStmt->close();
-
-        $profLimit  = ($type === 'professor') ? $perPage : 5;
-        $profOffset = ($type === 'professor') ? $offset  : 0;
-
-        $stmt = $mysqli->prepare("
-            SELECT p.id, p.name, p.bio,
-                   d.name AS dept_name,
-                   ROUND(AVG(r.rating_overall), 1) AS avg_rating,
-                   COUNT(DISTINCT r.id) AS review_count,
-                   GROUP_CONCAT(DISTINCT c.code ORDER BY c.code SEPARATOR ', ') AS courses
-            FROM professors p
-            LEFT JOIN departments d ON d.id = p.department_id
-            LEFT JOIN course_professor cp ON cp.professor_id = p.id
-            LEFT JOIN courses c ON c.id = cp.course_id
-            LEFT JOIN reviews r ON r.professor_id = p.id AND r.is_approved = 1
-            WHERE p.name LIKE ? $deptWhere
-            GROUP BY p.id
-            ORDER BY p.name ASC
-            LIMIT $profLimit OFFSET $profOffset
-        ");
-        $stmt->bind_param('s', $like);
-        $stmt->execute();
-        $professorResults = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $stmt->close();
-    }
+    // ── Teachers: match name ──
+    $stmt = $mysqli->prepare("
+        SELECT
+            t.id, t.name, t.designation,
+            ROUND(AVG(r.rating_overall), 1) AS avg_overall,
+            COUNT(DISTINCT r.id) AS review_count
+        FROM teachers t
+        LEFT JOIN reviews r ON r.teacher_id = t.id AND r.is_approved = 1
+        WHERE t.name LIKE ?
+        GROUP BY t.id
+        ORDER BY t.name ASC
+    ");
+    $stmt->bind_param('s', $like);
+    $stmt->execute();
+    $teachers = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
 }
 
-$totalPages = ($type === 'course')
-    ? (int)ceil($totalCourses    / $perPage)
-    : (($type === 'professor')
-        ? (int)ceil($totalProfessors / $perPage)
-        : 1);
-
-// Build query string without page for pagination
-function buildUrl(array $extra = []): string {
-    $params = array_merge($_GET, $extra);
-    unset($params['page']);
-    return 'search.php?' . http_build_query(array_filter($params, fn($v) => $v !== ''));
-}
+$hasSearched = ($query !== '');
+$hasResults  = (!empty($courses) || !empty($teachers));
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Search — FacultyReview</title>
-<style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search — FacultyReview</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --brand:      #4F46E5;
+            --brand-dark: #3730A3;
+            --brand-soft: #EEF2FF;
+            --warning:    #EAB308;
+            --bg:         #F1F5F9;
+            --card:       #FFFFFF;
+            --text:       #1E293B;
+            --muted:      #64748B;
+            --border:     #E2E8F0;
+            --radius:     14px;
+            --shadow:     0 2px 12px rgba(0,0,0,.06);
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; padding-bottom: 80px;
+        }
 
-    :root {
-        --brand:      #4F46E5;
-        --brand-dark: #3730A3;
-        --brand-soft: #EEF2FF;
-        --danger:     #EF4444;
-        --success:    #22C55E;
-        --warning:    #EAB308;
-        --bg:         #F1F5F9;
-        --card:       #FFFFFF;
-        --text:       #1E293B;
-        --muted:      #64748B;
-        --border:     #E2E8F0;
-        --radius:     14px;
-        --shadow:     0 4px 24px rgba(0,0,0,.06);
-    }
+        .topbar {
+            position: sticky; top: 0; z-index: 50;
+            background: var(--card); border-bottom: 1px solid var(--border);
+            padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .topbar-icon  { width:32px; height:32px; background:var(--brand); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; }
+        .topbar-name  { font-size:1.05rem; font-weight:700; color:var(--text); }
+        .topbar-name span { color: var(--brand); }
+        .avatar { width:34px; height:34px; border-radius:50%; background:var(--brand-soft); color:var(--brand-dark); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; text-decoration:none; }
 
-    body {
-        font-family: 'Segoe UI', system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-        min-height: 100vh;
-        padding-bottom: 76px;
-    }
+        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
 
-    /* ── Topbar ── */
-    .topbar {
-        position: sticky; top: 0; z-index: 50;
-        background: var(--card); border-bottom: 1px solid var(--border);
-        padding: 14px 16px;
-        display: flex; align-items: center; justify-content: space-between;
-    }
-    .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-    .topbar-icon {
-        width: 32px; height: 32px; background: var(--brand); border-radius: 9px;
-        display: flex; align-items: center; justify-content: center; font-size: 16px;
-    }
-    .topbar-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-    .topbar-name span { color: var(--brand); }
-    .avatar {
-        width: 34px; height: 34px; border-radius: 50%;
-        background: var(--brand-soft); color: var(--brand-dark);
-        display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 0.85rem; text-decoration: none;
-    }
+        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 12px; }
 
-    .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+        /* Search bar */
+        .search-form { display: flex; gap: 8px; margin-bottom: 18px; }
+        .search-input-wrap { flex: 1; position: relative; }
+        .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1rem; }
+        .search-input {
+            width: 100%; padding: 13px 14px 13px 40px; border: 1.5px solid var(--border); border-radius: 12px;
+            font-size: 0.95rem; background: var(--card); color: var(--text); outline: none;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .search-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+        .search-btn {
+            background: var(--brand); color: #fff; border: none; border-radius: 12px;
+            padding: 0 18px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background .15s;
+        }
+        .search-btn:hover { background: var(--brand-dark); }
 
-    /* ── Search box ── */
-    .search-box {
-        display: flex; gap: 8px; margin-bottom: 12px;
-    }
-    .search-input {
-        flex: 1;
-        padding: 13px 16px;
-        border: 1.5px solid var(--border);
-        border-radius: 12px;
-        font-size: 1rem;
-        color: var(--text);
-        background: var(--card);
-        outline: none;
-        -webkit-appearance: none;
-        transition: border-color .2s, box-shadow .2s;
-    }
-    .search-input:focus {
-        border-color: var(--brand);
-        box-shadow: 0 0 0 3px rgba(79,70,229,.12);
-    }
-    .search-btn {
-        padding: 0 20px;
-        background: var(--brand); color: #fff;
-        border: none; border-radius: 12px;
-        font-size: 1rem; font-weight: 600;
-        cursor: pointer;
-        transition: background .2s;
-    }
-    .search-btn:hover { background: var(--brand-dark); }
+        .results-summary { font-size: 0.82rem; color: var(--muted); margin-bottom: 16px; }
 
-    /* ── Filter row ── */
-    .filter-row {
-        display: flex; gap: 8px; margin-bottom: 14px;
-        overflow-x: auto; padding-bottom: 4px;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-    }
-    .filter-row::-webkit-scrollbar { display: none; }
+        .section-title { font-size: 0.95rem; font-weight: 700; margin: 18px 0 10px; display: flex; align-items: center; gap: 6px; }
+        .section-title:first-of-type { margin-top: 0; }
+        .count-badge { background: var(--brand-soft); color: var(--brand-dark); font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
 
-    .chip {
-        flex-shrink: 0;
-        padding: 8px 16px; border-radius: 20px;
-        font-size: 0.78rem; font-weight: 600;
-        background: var(--card); color: var(--muted);
-        border: 1.5px solid var(--border);
-        text-decoration: none; white-space: nowrap;
-        cursor: pointer;
-    }
-    .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+        /* Course card */
+        .course-card {
+            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
+            margin-bottom: 10px; text-decoration: none; color: var(--text); display: block;
+            transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
+        }
+        .course-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
+        .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .course-left { flex: 1; min-width: 0; }
+        .course-code { font-size: 0.68rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+        .course-name { font-size: 0.95rem; font-weight: 700; }
+        .course-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
+        .course-right { text-align: right; flex-shrink: 0; }
+        .stars        { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; display: block; }
+        .avg-num      { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+        .no-reviews   { font-size: 0.72rem; color: var(--muted); }
+        .mini-ratings { display: flex; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+        .mini-r { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; }
+        .mini-r-label { color: var(--muted); font-weight: 600; }
+        .mini-r-stars { color: var(--warning); font-size: 0.7rem; }
 
-    /* ── Department select ── */
-    .dept-select {
-        width: 100%; padding: 10px 12px;
-        border: 1.5px solid var(--border); border-radius: 10px;
-        font-size: 0.85rem; color: var(--text);
-        background: var(--card); outline: none;
-        margin-bottom: 14px;
-        -webkit-appearance: none;
-    }
+        /* Teacher card */
+        .teacher-card {
+            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
+            margin-bottom: 10px; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: 12px;
+            transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
+        }
+        .teacher-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
+        .teacher-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 0.85rem; color: #fff; }
+        .teacher-info { flex: 1; min-width: 0; }
+        .teacher-name { font-size: 0.92rem; font-weight: 700; }
+        .teacher-designation { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+        .teacher-right { text-align: right; flex-shrink: 0; }
 
-    /* ── Section header ── */
-    .section-head {
-        display: flex; justify-content: space-between; align-items: baseline;
-        margin-bottom: 10px; margin-top: 20px;
-    }
-    .section-title { font-size: 1rem; font-weight: 700; }
-    .result-count  { font-size: 0.78rem; color: var(--muted); }
-    .section-link  { font-size: 0.8rem; color: var(--brand); text-decoration: none; font-weight: 600; }
+        .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
+        .empty-emoji { font-size: 2.2rem; margin-bottom: 10px; }
+        .empty-text { font-size: 0.88rem; color: var(--muted); font-weight: 600; }
+        .empty-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 
-    /* ── Course card ── */
-    .card {
-        background: var(--card); border-radius: var(--radius);
-        box-shadow: var(--shadow); padding: 14px 16px;
-        margin-bottom: 10px; text-decoration: none; color: var(--text); display: block;
-    }
-    .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .course-code { font-size: 0.7rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .03em; }
-    .course-title { font-size: 0.95rem; font-weight: 700; margin-top: 2px; }
-    .course-meta  { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
-    .course-rating { text-align: right; flex-shrink: 0; }
-    .stars { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; }
-    .rating-count  { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
-    .no-rating { font-size: 0.72rem; color: var(--muted); }
+        .prompt-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+        .prompt-emoji { font-size: 2.4rem; margin-bottom: 10px; }
+        .prompt-text { font-size: 0.88rem; }
 
-    /* ── Professor card ── */
-    .prof-card {
-        background: var(--card); border-radius: var(--radius);
-        box-shadow: var(--shadow); padding: 14px 16px;
-        margin-bottom: 10px;
-        display: flex; align-items: center; gap: 12px;
-    }
-    .prof-avatar {
-        width: 42px; height: 42px; border-radius: 50%;
-        background: var(--brand-soft); color: var(--brand-dark);
-        display: flex; align-items: center; justify-content: center;
-        font-weight: 800; font-size: 1rem; flex-shrink: 0;
-    }
-    .prof-info { flex: 1; min-width: 0; }
-    .prof-name { font-size: 0.95rem; font-weight: 700; }
-    .prof-dept { font-size: 0.76rem; color: var(--muted); margin-top: 1px; }
-    .prof-courses { font-size: 0.72rem; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .prof-rating { text-align: right; flex-shrink: 0; }
-    .prof-stars { color: var(--warning); font-size: 0.85rem; }
-    .prof-count { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
-
-    /* ── Highlight matched text ── */
-    mark { background: #FEF08A; border-radius: 2px; padding: 0 1px; font-style: normal; }
-
-    /* ── Empty / landing state ── */
-    .empty-state { text-align: center; padding: 50px 16px; color: var(--muted); font-size: 0.85rem; }
-    .empty-state .emoji { font-size: 2.5rem; margin-bottom: 10px; }
-    .empty-state h3 { font-size: 1rem; color: var(--text); margin-bottom: 6px; }
-
-    /* ── Pagination ── */
-    .pagination { display: flex; justify-content: center; gap: 6px; margin-top: 20px; flex-wrap: wrap; }
-    .page-link {
-        min-width: 36px; height: 36px;
-        display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; background: var(--card); border: 1.5px solid var(--border);
-        color: var(--text); text-decoration: none; font-size: 0.85rem; font-weight: 600; padding: 0 8px;
-    }
-    .page-link.active  { background: var(--brand); color: #fff; border-color: var(--brand); }
-    .page-link.disabled { opacity: .4; pointer-events: none; }
-
-    /* ── Bottom nav ── */
-    .bottombar {
-        position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-        background: var(--card); border-top: 1px solid var(--border);
-        display: flex; justify-content: space-around; align-items: center;
-        padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-        max-width: 600px; margin: 0 auto;
-        box-shadow: 0 -2px 12px rgba(0,0,0,.04);
-    }
-    .nav-item {
-        display: flex; flex-direction: column; align-items: center; gap: 2px;
-        text-decoration: none; color: var(--muted);
-        font-size: 0.65rem; font-weight: 600; flex: 1; padding: 4px 0;
-    }
-    .nav-item .icon { font-size: 1.2rem; }
-    .nav-item.active { color: var(--brand); }
-    @media (min-width: 600px) {
-        .bottombar { left: 50%; transform: translateX(-50%); border-radius: 16px 16px 0 0; }
-    }
-</style>
+        .bottombar {
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+            background: var(--card); border-top: 1px solid var(--border);
+            display: flex; justify-content: space-around; align-items: center;
+            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
+        }
+        .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; text-decoration:none; color:var(--muted); font-size:0.62rem; font-weight:600; flex:1; padding:4px 0; }
+        .nav-item .icon { font-size:1.2rem; line-height:1; }
+        .nav-item.active { color: var(--brand); }
+    </style>
 </head>
 <body>
 
@@ -326,164 +183,101 @@ function buildUrl(array $extra = []): string {
         <div class="topbar-icon">🎓</div>
         <span class="topbar-name">Faculty<span>Review</span></span>
     </a>
-    <div class="topbar-right">
-        <a href="dashboard.php" class="avatar"><?= e(strtoupper(substr($userName, 0, 1))) ?></a>
-    </div>
+    <a href="dashboard.php" class="avatar"><?= e(strtoupper(substr($_SESSION['user_name'], 0, 1))) ?></a>
 </header>
 
 <div class="container">
 
-    <!-- ── Search form ── -->
-    <form method="GET" action="search.php">
-        <div class="search-box">
-            <input
-                type="search"
-                name="q"
-                class="search-input"
-                placeholder="Search courses or professors…"
-                value="<?= e($query) ?>"
-                autocomplete="off"
-                autofocus
-            >
-            <button type="submit" class="search-btn">🔍</button>
-        </div>
+    <div class="page-title">Search</div>
 
-        <!-- Type filter chips -->
-        <div class="filter-row">
-            <?php foreach (['all' => 'All', 'course' => '📚 Courses', 'professor' => '👨‍🏫 Professors'] as $val => $label): ?>
-                <a href="search.php?q=<?= urlencode($query) ?>&type=<?= $val ?>&dept=<?= $deptId ?>"
-                   class="chip <?= $type === $val ? 'active' : '' ?>">
-                    <?= $label ?>
-                </a>
-            <?php endforeach; ?>
+    <form method="GET" action="search.php" class="search-form">
+        <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" name="q" class="search-input" placeholder="Search courses or teachers…" value="<?= e($query) ?>" autofocus>
         </div>
-
-        <!-- Department filter -->
-        <select name="dept" class="dept-select" onchange="this.form.submit()">
-            <option value="0" <?= $deptId === 0 ? 'selected' : '' ?>>All Departments</option>
-            <?php foreach ($departments as $d): ?>
-                <option value="<?= (int)$d['id'] ?>" <?= $deptId === (int)$d['id'] ? 'selected' : '' ?>>
-                    <?= e($d['name']) ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <input type="hidden" name="type" value="<?= e($type) ?>">
+        <button type="submit" class="search-btn">Search</button>
     </form>
 
-    <?php if ($query === ''): ?>
-        <!-- ── Landing state ── -->
-        <div class="empty-state">
-            <div class="emoji">🔍</div>
-            <h3>Search FacultyReview</h3>
-            Type a course code, course name, or professor's name above.
+    <?php if (!$hasSearched): ?>
+        <div class="prompt-state">
+            <div class="prompt-emoji">🔎</div>
+            <div class="prompt-text">Search for a course code, course name, or teacher name.</div>
         </div>
 
-    <?php elseif (empty($courseResults) && empty($professorResults)): ?>
-        <!-- ── No results ── -->
+    <?php elseif (!$hasResults): ?>
         <div class="empty-state">
-            <div class="emoji">😕</div>
-            <h3>No results for "<?= e($query) ?>"</h3>
-            Try a different keyword or remove the department filter.
+            <div class="empty-emoji">🫥</div>
+            <div class="empty-text">No results for "<?= e($query) ?>"</div>
+            <div class="empty-sub">Try a different keyword or check your spelling.</div>
         </div>
 
     <?php else: ?>
-
-        <?php
-        // Helper: highlight query match inside text
-        function highlight(string $text, string $q): string {
-            if ($q === '') return e($text);
-            $safe = preg_quote($q, '/');
-            return preg_replace(
-                '/(' . $safe . ')/iu',
-                '<mark>$1</mark>',
-                e($text)
-            );
-        }
-        ?>
-
-        <!-- ── Course results ── -->
-        <?php if (!empty($courseResults)): ?>
-        <div class="section-head">
-            <div class="section-title">Courses</div>
-            <div class="result-count">
-                <?= (int)$totalCourses ?> found
-                <?php if ($type === 'all' && $totalCourses > 5): ?>
-                    · <a href="search.php?q=<?= urlencode($query) ?>&type=course&dept=<?= $deptId ?>" class="section-link">See all →</a>
-                <?php endif; ?>
-            </div>
+        <div class="results-summary">
+            Found <?= count($courses) ?> course<?= count($courses) == 1 ? '' : 's' ?> and
+            <?= count($teachers) ?> teacher<?= count($teachers) == 1 ? '' : 's' ?> matching "<?= e($query) ?>"
         </div>
 
-        <?php foreach ($courseResults as $c): ?>
-            <a href="course_detail.php?id=<?= (int)$c['id'] ?>" class="card">
+        <?php if (!empty($courses)): ?>
+            <div class="section-title">📚 Courses <span class="count-badge"><?= count($courses) ?></span></div>
+            <?php foreach ($courses as $c):
+                $hasReviews = $c['review_count'] > 0;
+            ?>
+            <a href="course_detail.php?id=<?= (int)$c['id'] ?>" class="course-card">
                 <div class="course-top">
-                    <div>
-                        <div class="course-code"><?= highlight($c['code'], $query) ?></div>
-                        <div class="course-title"><?= highlight($c['title'], $query) ?></div>
-                        <div class="course-meta"><?= e($c['dept_name'] ?? 'General') ?> · <?= (int)$c['credit_hours'] ?> credits</div>
+                    <div class="course-left">
+                        <div class="course-code"><?= e($c['code']) ?></div>
+                        <div class="course-name"><?= e($c['name']) ?></div>
+                        <div class="course-meta"><?= semesterLabel((int)$c['semester']) ?> · <?= number_format((float)$c['credit'], 2) ?> credits</div>
                     </div>
-                    <div class="course-rating">
-                        <?php if ($c['review_count'] > 0): ?>
-                            <div class="stars"><?= starDisplay((float)$c['avg_rating']) ?></div>
-                            <div class="rating-count"><?= (int)$c['review_count'] ?> review<?= $c['review_count'] == 1 ? '' : 's' ?></div>
+                    <div class="course-right">
+                        <?php if ($hasReviews): ?>
+                            <span class="stars"><?= starDisplay((float)$c['avg_overall']) ?></span>
+                            <span class="avg-num"><?= number_format((float)$c['avg_overall'], 1) ?></span>
                         <?php else: ?>
-                            <div class="no-rating">No reviews yet</div>
+                            <span class="no-reviews">No reviews yet</span>
                         <?php endif; ?>
                     </div>
                 </div>
+                <?php if ($hasReviews): ?>
+                <div class="mini-ratings">
+                    <div class="mini-r"><span class="mini-r-label">Teaching</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_teaching']) ?></span></div>
+                    <div class="mini-r"><span class="mini-r-label">Workload</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_workload']) ?></span></div>
+                    <div class="mini-r"><span class="mini-r-label">Grading</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_grading']) ?></span></div>
+                </div>
+                <?php endif; ?>
             </a>
-        <?php endforeach; ?>
+            <?php endforeach; ?>
         <?php endif; ?>
 
-        <!-- ── Professor results ── -->
-        <?php if (!empty($professorResults)): ?>
-        <div class="section-head">
-            <div class="section-title">Professors</div>
-            <div class="result-count">
-                <?= (int)$totalProfessors ?> found
-                <?php if ($type === 'all' && $totalProfessors > 5): ?>
-                    · <a href="search.php?q=<?= urlencode($query) ?>&type=professor&dept=<?= $deptId ?>" class="section-link">See all →</a>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <?php foreach ($professorResults as $prof): ?>
-        <div class="prof-card">
-            <div class="prof-avatar"><?= e(strtoupper(substr($prof['name'], 0, 1))) ?></div>
-            <div class="prof-info">
-                <div class="prof-name"><?= highlight($prof['name'], $query) ?></div>
-                <div class="prof-dept"><?= e($prof['dept_name'] ?? 'Unassigned') ?></div>
-                <?php if ($prof['courses']): ?>
-                    <div class="prof-courses">Teaches: <?= e($prof['courses']) ?></div>
-                <?php endif; ?>
-            </div>
-            <div class="prof-rating">
-                <?php if ($prof['review_count'] > 0): ?>
-                    <div class="prof-stars"><?= starDisplay((float)$prof['avg_rating']) ?></div>
-                    <div class="prof-count"><?= (int)$prof['review_count'] ?> review<?= $prof['review_count'] == 1 ? '' : 's' ?></div>
-                <?php else: ?>
-                    <div class="prof-count" style="color:var(--muted)">No reviews</div>
-                <?php endif; ?>
-            </div>
-        </div>
-        <?php endforeach; ?>
-        <?php endif; ?>
-
-        <!-- ── Pagination (only in single-type mode) ── -->
-        <?php if ($type !== 'all' && $totalPages > 1): ?>
-        <div class="pagination">
-            <?php
-                $prev = max(1, $page - 1);
-                $next = min($totalPages, $page + 1);
-                $base = buildUrl();
+        <?php if (!empty($teachers)): ?>
+            <div class="section-title">👨‍🏫 Teachers <span class="count-badge"><?= count($teachers) ?></span></div>
+            <?php foreach ($teachers as $t):
+                $hasReviews = $t['review_count'] > 0;
+                $initials = '';
+                foreach (explode(' ', $t['name']) as $part) {
+                    $part = preg_replace('/[^A-Za-z]/', '', $part);
+                    if ($part !== '') $initials .= strtoupper($part[0]);
+                    if (strlen($initials) >= 2) break;
+                }
+                $designColor = designationColor($t['designation']);
             ?>
-            <a href="<?= $base ?>&page=<?= $prev ?>" class="page-link <?= $page === 1 ? 'disabled' : '' ?>">‹</a>
-            <?php for ($p = 1; $p <= $totalPages; $p++): ?>
-                <a href="<?= $base ?>&page=<?= $p ?>" class="page-link <?= $p === $page ? 'active' : '' ?>"><?= $p ?></a>
-            <?php endfor; ?>
-            <a href="<?= $base ?>&page=<?= $next ?>" class="page-link <?= $page === $totalPages ? 'disabled' : '' ?>">›</a>
-        </div>
+            <a href="teacher_detail.php?id=<?= (int)$t['id'] ?>" class="teacher-card">
+                <div class="teacher-avatar" style="background: <?= e($designColor) ?>;"><?= e($initials ?: '?') ?></div>
+                <div class="teacher-info">
+                    <div class="teacher-name"><?= e($t['name']) ?></div>
+                    <div class="teacher-designation"><?= e($t['designation']) ?></div>
+                </div>
+                <div class="teacher-right">
+                    <?php if ($hasReviews): ?>
+                        <span class="stars"><?= starDisplay((float)$t['avg_overall']) ?></span>
+                        <span class="avg-num"><?= number_format((float)$t['avg_overall'], 1) ?> · <?= (int)$t['review_count'] ?> review<?= $t['review_count'] == 1 ? '' : 's' ?></span>
+                    <?php else: ?>
+                        <span class="no-reviews">No reviews yet</span>
+                    <?php endif; ?>
+                </div>
+            </a>
+            <?php endforeach; ?>
         <?php endif; ?>
-
     <?php endif; ?>
 
 </div>
@@ -492,7 +286,7 @@ function buildUrl(array $extra = []): string {
     <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
     <a href="courses.php"   class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
     <a href="search.php"    class="nav-item active"><span class="icon">🔍</span><span>Search</span></a>
-    <a href="submit_review.php" class="nav-item"><span class="icon">➕</span><span>Review</span></a>
+    <a href="submit_review.php" class="nav-item"><span class="icon">✏️</span><span>Review</span></a>
     <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
 </nav>
 

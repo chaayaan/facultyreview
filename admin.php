@@ -1,560 +1,579 @@
 <?php
 // ============================================================
 //  FacultyReview — admin.php
-//  Admin-only panel: stats overview, review moderation queue,
-//  flagged reviews, and quick approve / delete actions.
+//  Admin dashboard: live stats overview + quick action links.
+//  Access: admin only (requireAdmin redirects students away).
 // ============================================================
 require_once 'db.php';
 requireAdmin();
 
-$adminName = $_SESSION['user_name'];
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-// ── Handle POST actions (approve / delete / unflag) ─────────
-$actionMsg = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verifyCsrf();
+$adminName = $_SESSION['user_name'] ?? 'Admin';
 
-    $action   = $_POST['action']    ?? '';
-    $reviewId = (int)($_POST['review_id'] ?? 0);
-
-    if ($reviewId > 0) {
-        if ($action === 'approve') {
-            $s = $mysqli->prepare("UPDATE reviews SET is_approved = 1, is_flagged = 0 WHERE id = ?");
-            $s->bind_param('i', $reviewId);
-            $s->execute();
-            $actionMsg = 'Review approved and published.';
-        } elseif ($action === 'delete') {
-            $s = $mysqli->prepare("DELETE FROM reviews WHERE id = ?");
-            $s->bind_param('i', $reviewId);
-            $s->execute();
-            $actionMsg = 'Review deleted.';
-        } elseif ($action === 'unflag') {
-            $s = $mysqli->prepare("UPDATE reviews SET is_flagged = 0 WHERE id = ?");
-            $s->bind_param('i', $reviewId);
-            $s->execute();
-            $actionMsg = 'Flag dismissed.';
-        }
-        $s->close();
-    }
-}
-
-// ── Stats ────────────────────────────────────────────────────
+// ── Live stats ──
 $stats = [];
-$stats['total_reviews']   = $mysqli->query("SELECT COUNT(*) AS c FROM reviews")->fetch_assoc()['c'];
-$stats['pending']         = $mysqli->query("SELECT COUNT(*) AS c FROM reviews WHERE is_approved = 0")->fetch_assoc()['c'];
-$stats['approved']        = $mysqli->query("SELECT COUNT(*) AS c FROM reviews WHERE is_approved = 1")->fetch_assoc()['c'];
-$stats['flagged']         = $mysqli->query("SELECT COUNT(*) AS c FROM reviews WHERE is_flagged = 1")->fetch_assoc()['c'];
-$stats['total_users']     = $mysqli->query("SELECT COUNT(*) AS c FROM users WHERE role = 'student'")->fetch_assoc()['c'];
-$stats['total_courses']   = $mysqli->query("SELECT COUNT(*) AS c FROM courses")->fetch_assoc()['c'];
 
-// ── Active tab ───────────────────────────────────────────────
-$tab = $_GET['tab'] ?? 'pending';
-if (!in_array($tab, ['pending', 'flagged', 'all'])) $tab = 'pending';
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM users WHERE role = 'student'");
+$stats['students'] = (int)$res->fetch_assoc()['n'];
 
-// ── Pagination ───────────────────────────────────────────────
-$page    = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 10;
-$offset  = ($page - 1) * $perPage;
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM teachers");
+$stats['teachers'] = (int)$res->fetch_assoc()['n'];
 
-if ($tab === 'pending') {
-    $countSql = "SELECT COUNT(*) AS c FROM reviews WHERE is_approved = 0";
-    $listSql  = "
-        SELECT r.id, r.rating_overall, r.rating_teaching, r.rating_workload,
-               r.rating_grading, r.comment, r.semester, r.created_at,
-               r.is_approved, r.is_flagged,
-               u.name AS student_name, u.email AS student_email,
-               c.code AS course_code, c.title AS course_title,
-               p.name AS professor_name
-        FROM reviews r
-        JOIN users u      ON u.id = r.user_id
-        JOIN courses c    ON c.id = r.course_id
-        JOIN professors p ON p.id = r.professor_id
-        WHERE r.is_approved = 0
-        ORDER BY r.created_at ASC
-        LIMIT $perPage OFFSET $offset
-    ";
-} elseif ($tab === 'flagged') {
-    $countSql = "SELECT COUNT(*) AS c FROM reviews WHERE is_flagged = 1";
-    $listSql  = "
-        SELECT r.id, r.rating_overall, r.rating_teaching, r.rating_workload,
-               r.rating_grading, r.comment, r.semester, r.created_at,
-               r.is_approved, r.is_flagged,
-               u.name AS student_name, u.email AS student_email,
-               c.code AS course_code, c.title AS course_title,
-               p.name AS professor_name
-        FROM reviews r
-        JOIN users u      ON u.id = r.user_id
-        JOIN courses c    ON c.id = r.course_id
-        JOIN professors p ON p.id = r.professor_id
-        WHERE r.is_flagged = 1
-        ORDER BY r.created_at DESC
-        LIMIT $perPage OFFSET $offset
-    ";
-} else { // all
-    $countSql = "SELECT COUNT(*) AS c FROM reviews";
-    $listSql  = "
-        SELECT r.id, r.rating_overall, r.rating_teaching, r.rating_workload,
-               r.rating_grading, r.comment, r.semester, r.created_at,
-               r.is_approved, r.is_flagged,
-               u.name AS student_name, u.email AS student_email,
-               c.code AS course_code, c.title AS course_title,
-               p.name AS professor_name
-        FROM reviews r
-        JOIN users u      ON u.id = r.user_id
-        JOIN courses c    ON c.id = r.course_id
-        JOIN professors p ON p.id = r.professor_id
-        ORDER BY r.is_flagged DESC, r.is_approved ASC, r.created_at DESC
-        LIMIT $perPage OFFSET $offset
-    ";
-}
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM courses");
+$stats['courses'] = (int)$res->fetch_assoc()['n'];
 
-$totalReviews = $mysqli->query($countSql)->fetch_assoc()['c'];
-$reviews      = $mysqli->query($listSql)->fetch_all(MYSQLI_ASSOC);
-$totalPages   = (int)ceil($totalReviews / $perPage);
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM sessions");
+$stats['sessions'] = (int)$res->fetch_assoc()['n'];
 
-// ── Top 5 most reviewed courses ──────────────────────────────
-$topCourses = $mysqli->query("
-    SELECT c.code, c.title, COUNT(r.id) AS cnt
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM reviews WHERE is_approved = 0 AND is_flagged = 0");
+$stats['pending'] = (int)$res->fetch_assoc()['n'];
+
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM reviews WHERE is_approved = 1");
+$stats['approved'] = (int)$res->fetch_assoc()['n'];
+
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM reviews WHERE is_flagged = 1");
+$stats['flagged'] = (int)$res->fetch_assoc()['n'];
+
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM reviews");
+$stats['total_reviews'] = (int)$res->fetch_assoc()['n'];
+
+// ── Active session label ──
+$res = $mysqli->query("SELECT label FROM sessions WHERE is_active = 1 LIMIT 1");
+$activeSession = $res && $res->num_rows ? $res->fetch_assoc()['label'] : 'None set';
+
+// ── Recent 5 pending reviews (for quick glance) ──
+$recentPending = [];
+$res = $mysqli->query("
+    SELECT r.id, r.rating_overall, r.created_at,
+           c.code AS course_code, c.name AS course_name,
+           t.name AS teacher_name,
+           u.student_id
     FROM reviews r
-    JOIN courses c ON c.id = r.course_id
-    WHERE r.is_approved = 1
-    GROUP BY c.id
-    ORDER BY cnt DESC
+    JOIN courses  c ON c.id = r.course_id
+    JOIN teachers t ON t.id = r.teacher_id
+    JOIN users    u ON u.id = r.user_id
+    WHERE r.is_approved = 0 AND r.is_flagged = 0
+    ORDER BY r.created_at DESC
     LIMIT 5
-")->fetch_all(MYSQLI_ASSOC);
+");
+if ($res) $recentPending = $res->fetch_all(MYSQLI_ASSOC);
+
+// ── Recent 5 flagged reviews ──
+$recentFlagged = [];
+$res = $mysqli->query("
+    SELECT r.id, r.rating_overall, r.created_at,
+           c.code AS course_code,
+           t.name AS teacher_name,
+           u.student_id
+    FROM reviews r
+    JOIN courses  c ON c.id = r.course_id
+    JOIN teachers t ON t.id = r.teacher_id
+    JOIN users    u ON u.id = r.user_id
+    WHERE r.is_flagged = 1
+    ORDER BY r.created_at DESC
+    LIMIT 5
+");
+if ($res) $recentFlagged = $res->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Panel — FacultyReview</title>
-<style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard — FacultyReview</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --brand:       #4F46E5;
+            --brand-dark:  #3730A3;
+            --brand-soft:  #EEF2FF;
+            --danger:      #EF4444;
+            --danger-soft: #FEF2F2;
+            --success:     #22C55E;
+            --success-soft:#F0FDF4;
+            --warning:     #EAB308;
+            --warning-soft:#FEFCE8;
+            --orange:      #F97316;
+            --orange-soft: #FFF7ED;
+            --purple:      #7C3AED;
+            --purple-soft: #F5F3FF;
+            --bg:          #F1F5F9;
+            --card:        #FFFFFF;
+            --text:        #1E293B;
+            --muted:       #64748B;
+            --border:      #E2E8F0;
+            --radius:      14px;
+            --shadow:      0 2px 12px rgba(0,0,0,.06);
+        }
 
-    :root {
-        --brand:      #4F46E5;
-        --brand-dark: #3730A3;
-        --brand-soft: #EEF2FF;
-        --danger:     #EF4444;
-        --danger-soft:#FEF2F2;
-        --success:    #22C55E;
-        --success-soft:#DCFCE7;
-        --warning:    #EAB308;
-        --warn-soft:  #FEF3C7;
-        --bg:         #F1F5F9;
-        --card:       #FFFFFF;
-        --text:       #1E293B;
-        --muted:      #64748B;
-        --border:     #E2E8F0;
-        --radius:     14px;
-        --shadow:     0 4px 24px rgba(0,0,0,.06);
-    }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; padding-bottom: 80px;
+        }
 
-    body {
-        font-family: 'Segoe UI', system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-        min-height: 100vh;
-        padding-bottom: 32px;
-    }
+        /* ── Topbar ── */
+        .topbar {
+            background: var(--brand);
+            padding: 0 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            height: 56px; position: sticky; top: 0; z-index: 50;
+            box-shadow: 0 2px 16px rgba(79,70,229,.25);
+        }
+        .topbar-left { display: flex; align-items: center; gap: 10px; }
+        .topbar-logo {
+            font-size: 1rem; font-weight: 800; color: #fff; letter-spacing: -.3px;
+        }
+        .topbar-logo span { opacity: .7; font-weight: 400; }
+        .admin-chip {
+            background: rgba(255,255,255,.18); color: #fff;
+            font-size: 0.65rem; font-weight: 700; padding: 3px 8px;
+            border-radius: 20px; letter-spacing: .05em; text-transform: uppercase;
+        }
+        .topbar-right { display: flex; align-items: center; gap: 10px; }
+        .admin-name { color: rgba(255,255,255,.85); font-size: 0.8rem; font-weight: 600; }
+        .logout-btn {
+            background: rgba(255,255,255,.18); color: #fff;
+            border: none; border-radius: 8px; padding: 6px 12px;
+            font-size: 0.76rem; font-weight: 700; cursor: pointer;
+            text-decoration: none; transition: background .15s;
+        }
+        .logout-btn:hover { background: rgba(255,255,255,.28); }
 
-    /* ── Top bar ── */
-    .topbar {
-        position: sticky; top: 0; z-index: 50;
-        background: var(--card);
-        border-bottom: 1px solid var(--border);
-        padding: 14px 16px;
-        display: flex; align-items: center; justify-content: space-between;
-    }
-    .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-    .topbar-icon {
-        width: 32px; height: 32px; background: var(--brand); border-radius: 9px;
-        display: flex; align-items: center; justify-content: center; font-size: 16px;
-    }
-    .topbar-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-    .topbar-name span { color: var(--brand); }
-    .topbar-right { display: flex; align-items: center; gap: 10px; }
-    .admin-badge {
-        background: var(--brand); color: #fff;
-        font-size: 0.65rem; font-weight: 700;
-        padding: 3px 8px; border-radius: 20px;
-        text-transform: uppercase; letter-spacing: .04em;
-    }
-    .avatar {
-        width: 34px; height: 34px; border-radius: 50%;
-        background: var(--brand-soft); color: var(--brand-dark);
-        display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 0.85rem; text-decoration: none;
-    }
+        /* ── Page layout ── */
+        .container { max-width: 700px; margin: 0 auto; padding: 18px 14px; }
 
-    .container { max-width: 720px; margin: 0 auto; padding: 16px 14px; }
+        /* ── Greeting ── */
+        .greeting { margin-bottom: 18px; }
+        .greeting-title {
+            font-size: 1.3rem; font-weight: 800; color: var(--text); margin-bottom: 4px;
+        }
+        .greeting-sub { font-size: 0.83rem; color: var(--muted); }
+        .active-session-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            background: var(--success-soft); color: #166534;
+            border: 1px solid #BBF7D0; border-radius: 20px;
+            padding: 4px 11px; font-size: 0.73rem; font-weight: 700; margin-top: 8px;
+        }
 
-    .page-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 2px; }
-    .page-sub { font-size: 0.85rem; color: var(--muted); margin-bottom: 18px; }
+        /* ── Alert banner (pending) ── */
+        .alert-banner {
+            background: var(--warning-soft); border: 1px solid #FDE68A;
+            border-radius: var(--radius); padding: 12px 14px;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin-bottom: 18px;
+        }
+        .alert-banner-text { font-size: 0.83rem; font-weight: 600; color: #92400E; }
+        .alert-banner-text strong { font-size: 1rem; color: #78350F; }
+        .alert-banner-link {
+            background: var(--warning); color: #fff; border-radius: 8px;
+            padding: 7px 13px; font-size: 0.76rem; font-weight: 700;
+            text-decoration: none; white-space: nowrap; flex-shrink: 0;
+            transition: opacity .15s;
+        }
+        .alert-banner-link:hover { opacity: .88; }
 
-    /* ── Flash message ── */
-    .flash {
-        padding: 11px 14px; border-radius: 10px;
-        margin-bottom: 14px; font-size: 0.85rem; font-weight: 600;
-        background: var(--success-soft); color: #166534;
-        border-left: 4px solid var(--success);
-    }
+        /* ── Stats grid ── */
+        .section-label {
+            font-size: 0.72rem; font-weight: 700; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px;
+        }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+            margin-bottom: 20px;
+        }
+        @media (min-width: 480px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } }
 
-    /* ── Stat grid ── */
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-    @media (min-width: 480px) {
-        .stats-grid { grid-template-columns: repeat(6, 1fr); }
-    }
-    .stat-card {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 12px 10px;
-        text-align: center;
-    }
-    .stat-num { font-size: 1.3rem; font-weight: 800; color: var(--brand); }
-    .stat-num.danger  { color: var(--danger); }
-    .stat-num.warning { color: var(--warning); }
-    .stat-label { font-size: 0.63rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 2px; }
+        .stat-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px 14px;
+            display: flex; align-items: flex-start; gap: 12px;
+            text-decoration: none; color: inherit;
+            transition: transform .15s, box-shadow .15s;
+            cursor: default;
+        }
+        .stat-card.clickable { cursor: pointer; }
+        .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.1); }
 
-    /* ── Section ── */
-    .section-head {
-        display: flex; justify-content: space-between; align-items: baseline;
-        margin-bottom: 10px; margin-top: 22px;
-    }
-    .section-title { font-size: 1rem; font-weight: 700; }
+        .stat-icon {
+            width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
+        }
+        .stat-body { flex: 1; min-width: 0; }
+        .stat-num { font-size: 1.6rem; font-weight: 800; line-height: 1; margin-bottom: 3px; }
+        .stat-name { font-size: 0.72rem; color: var(--muted); font-weight: 600;
+            text-transform: uppercase; letter-spacing: .04em; }
 
-    /* ── Top courses table ── */
-    .top-table {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        overflow: hidden;
-        margin-bottom: 20px;
-    }
-    .top-table table { width: 100%; border-collapse: collapse; }
-    .top-table th, .top-table td {
-        padding: 10px 14px;
-        text-align: left;
-        font-size: 0.83rem;
-        border-bottom: 1px solid var(--border);
-    }
-    .top-table th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: #FAFAFA; }
-    .top-table tr:last-child td { border-bottom: none; }
-    .course-code-cell { font-weight: 700; color: var(--brand); }
+        /* stat color themes */
+        .theme-blue   .stat-icon { background: var(--brand-soft); }
+        .theme-blue   .stat-num  { color: var(--brand); }
+        .theme-green  .stat-icon { background: var(--success-soft); }
+        .theme-green  .stat-num  { color: #16A34A; }
+        .theme-orange .stat-icon { background: var(--orange-soft); }
+        .theme-orange .stat-num  { color: var(--orange); }
+        .theme-red    .stat-icon { background: var(--danger-soft); }
+        .theme-red    .stat-num  { color: var(--danger); }
+        .theme-yellow .stat-icon { background: var(--warning-soft); }
+        .theme-yellow .stat-num  { color: #A16207; }
+        .theme-purple .stat-icon { background: var(--purple-soft); }
+        .theme-purple .stat-num  { color: var(--purple); }
 
-    /* ── Tabs ── */
-    .tabs {
-        display: flex; gap: 4px; background: var(--card);
-        border-radius: 12px; padding: 4px;
-        box-shadow: var(--shadow); margin-bottom: 14px;
-    }
-    .tab-link {
-        flex: 1; text-align: center;
-        padding: 9px 4px;
-        border-radius: 9px;
-        font-size: 0.8rem; font-weight: 600;
-        text-decoration: none;
-        color: var(--muted);
-        transition: background .15s, color .15s;
-    }
-    .tab-link.active { background: var(--brand); color: #fff; }
-    .tab-badge {
-        display: inline-block;
-        background: var(--danger);
-        color: #fff;
-        font-size: 0.6rem;
-        padding: 1px 5px;
-        border-radius: 10px;
-        margin-left: 3px;
-        vertical-align: middle;
-    }
+        /* ── Quick actions ── */
+        .actions-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+            margin-bottom: 20px;
+        }
+        .action-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px 14px;
+            text-decoration: none; color: var(--text);
+            display: flex; align-items: center; gap: 12px;
+            transition: transform .15s, box-shadow .15s;
+            border: 1.5px solid transparent;
+        }
+        .action-card:hover {
+            transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.1);
+            border-color: var(--brand-soft);
+        }
+        .action-icon {
+            width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+            background: var(--brand-soft); color: var(--brand);
+            display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+        }
+        .action-body { flex: 1; min-width: 0; }
+        .action-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 2px; }
+        .action-sub { font-size: 0.72rem; color: var(--muted); }
+        .action-arrow { color: var(--muted); font-size: 0.9rem; flex-shrink: 0; }
 
-    /* ── Review moderation card ── */
-    .rev-card {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 14px 16px;
-        margin-bottom: 10px;
-    }
-    .rev-card.is-flagged { border-left: 4px solid var(--danger); }
+        /* ── Recent review lists ── */
+        .two-col { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 20px; }
+        @media (min-width: 560px) { .two-col { grid-template-columns: 1fr 1fr; } }
 
-    .rev-meta {
-        display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
-        margin-bottom: 8px;
-    }
-    .rev-course { font-size: 0.85rem; font-weight: 700; }
-    .rev-course span { color: var(--brand); }
-    .rev-prof { font-size: 0.76rem; color: var(--muted); }
-    .rev-sem  { font-size: 0.72rem; color: var(--muted); }
+        .list-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); overflow: hidden;
+        }
+        .list-card-header {
+            padding: 12px 14px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .list-card-title {
+            font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; gap: 6px;
+        }
+        .list-badge {
+            font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 20px;
+        }
+        .badge-yellow { background: var(--warning-soft); color: #A16207; }
+        .badge-red    { background: var(--danger-soft);  color: #991B1B; }
+        .list-view-all {
+            font-size: 0.72rem; font-weight: 700; color: var(--brand);
+            text-decoration: none;
+        }
+        .list-view-all:hover { text-decoration: underline; }
 
-    .badge {
-        font-size: 0.62rem; font-weight: 700;
-        padding: 3px 8px; border-radius: 20px;
-        text-transform: uppercase; letter-spacing: .03em;
-        flex-shrink: 0; white-space: nowrap;
-    }
-    .badge-pending  { background: var(--warn-soft);    color: #92400E; }
-    .badge-approved { background: var(--success-soft); color: #166534; }
-    .badge-flagged  { background: var(--danger-soft);  color: #991B1B; }
+        .review-row {
+            padding: 10px 14px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: flex-start; gap: 10px;
+        }
+        .review-row:last-child { border-bottom: none; }
+        .review-row-icon {
+            width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+        }
+        .icon-yellow { background: var(--warning-soft); }
+        .icon-red    { background: var(--danger-soft); }
+        .review-row-body { flex: 1; min-width: 0; }
+        .review-row-course {
+            font-size: 0.8rem; font-weight: 700; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .review-row-meta { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+        .review-row-stars { color: var(--warning); font-size: 0.72rem; }
+        .empty-list { padding: 20px 14px; text-align: center; color: var(--muted); font-size: 0.8rem; }
 
-    .rev-ratings {
-        display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
-    }
-    .mini-tag {
-        font-size: 0.72rem; background: var(--bg);
-        padding: 3px 8px; border-radius: 6px; color: var(--muted);
-    }
-    .mini-tag strong { color: var(--text); }
+        /* ── Bottom nav ── */
+        .bottombar {
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+            background: var(--card); border-top: 1px solid var(--border);
+            display: flex; justify-content: space-around; align-items: center;
+            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
+        }
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            text-decoration: none; color: var(--muted);
+            font-size: 0.6rem; font-weight: 600; flex: 1; padding: 4px 0;
+        }
+        .nav-item .icon { font-size: 1.15rem; line-height: 1; }
+        .nav-item.active { color: var(--brand); }
 
-    .rev-comment {
-        font-size: 0.85rem; color: var(--text);
-        line-height: 1.55; margin-bottom: 10px;
-        background: #FAFAFA; border-radius: 8px;
-        padding: 9px 11px;
-    }
-
-    .rev-author {
-        font-size: 0.72rem; color: var(--muted);
-        margin-bottom: 10px;
-    }
-    .rev-author strong { color: var(--text); }
-
-    .action-row { display: flex; gap: 8px; flex-wrap: wrap; }
-    .btn {
-        padding: 8px 16px; border-radius: 8px;
-        font-size: 0.8rem; font-weight: 600;
-        cursor: pointer; border: none;
-        transition: opacity .15s;
-    }
-    .btn:hover { opacity: .85; }
-    .btn-approve { background: var(--success);    color: #fff; }
-    .btn-delete  { background: var(--danger);     color: #fff; }
-    .btn-unflag  { background: var(--warn-soft);  color: #92400E; border: 1.5px solid #FDE68A; }
-    .btn-view    { background: var(--brand-soft); color: var(--brand); }
-
-    .empty-state { text-align: center; padding: 40px 16px; color: var(--muted); font-size: 0.85rem; }
-    .empty-state .emoji { font-size: 2rem; margin-bottom: 8px; }
-
-    /* ── Pagination ── */
-    .pagination {
-        display: flex; justify-content: center; gap: 6px;
-        margin-top: 20px; flex-wrap: wrap;
-    }
-    .page-link {
-        min-width: 36px; height: 36px;
-        display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; background: var(--card);
-        border: 1.5px solid var(--border); color: var(--text);
-        text-decoration: none; font-size: 0.85rem; font-weight: 600; padding: 0 8px;
-    }
-    .page-link.active  { background: var(--brand); color: #fff; border-color: var(--brand); }
-    .page-link.disabled { opacity: .4; pointer-events: none; }
-</style>
+        /* ── Review approval percentage ring (CSS only) ── */
+        .approval-wrap {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px 14px;
+            margin-bottom: 20px; display: flex; align-items: center; gap: 16px;
+        }
+        .ring-wrap { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
+        .ring-svg { transform: rotate(-90deg); }
+        .ring-bg   { fill: none; stroke: var(--border); stroke-width: 6; }
+        .ring-fill { fill: none; stroke: var(--success); stroke-width: 6;
+            stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
+        .ring-label {
+            position: absolute; inset: 0; display: flex; align-items: center;
+            justify-content: center; font-size: 0.75rem; font-weight: 800; color: var(--text);
+        }
+        .approval-text-wrap { flex: 1; }
+        .approval-title { font-size: 0.92rem; font-weight: 700; margin-bottom: 4px; }
+        .approval-sub   { font-size: 0.75rem; color: var(--muted); line-height: 1.4; }
+    </style>
 </head>
 <body>
 
-<!-- ── Top bar ── -->
+<!-- ── Topbar ── -->
 <header class="topbar">
-    <a href="dashboard.php" class="topbar-brand">
-        <div class="topbar-icon">🎓</div>
-        <span class="topbar-name">Faculty<span>Review</span></span>
-    </a>
+    <div class="topbar-left">
+        <div class="topbar-logo">Faculty<span>Review</span></div>
+        <span class="admin-chip">Admin</span>
+    </div>
     <div class="topbar-right">
-        <span class="admin-badge">Admin</span>
-        <a href="logout.php" class="avatar" title="Logout">🚪</a>
+        <span class="admin-name">👤 <?= e($adminName) ?></span>
+        <a href="logout.php" class="logout-btn">Logout</a>
     </div>
 </header>
 
 <div class="container">
 
-    <div class="page-title">Admin Panel</div>
-    <div class="page-sub">Welcome back, <?= e(explode(' ', $adminName)[0]) ?>. Here's today's overview.</div>
+    <!-- ── Greeting ── -->
+    <div class="greeting">
+        <div class="greeting-title">Welcome back, <?= e(explode(' ', $adminName)[0]) ?> 👋</div>
+        <div class="greeting-sub">Here's what's happening on FacultyReview today.</div>
+        <div class="active-session-badge">
+            🟢 Active session: <?= e($activeSession) ?>
+        </div>
+    </div>
 
-    <?php if ($actionMsg): ?>
-        <div class="flash">✅ <?= e($actionMsg) ?></div>
+    <!-- ── Pending alert banner ── -->
+    <?php if ($stats['pending'] > 0): ?>
+    <div class="alert-banner">
+        <div class="alert-banner-text">
+            <strong><?= $stats['pending'] ?></strong>
+            review<?= $stats['pending'] === 1 ? '' : 's' ?> waiting for your approval
+        </div>
+        <a href="admin_reviews.php?filter=pending" class="alert-banner-link">Review now →</a>
+    </div>
     <?php endif; ?>
 
-    <!-- ── Stats ── -->
+    <?php if ($stats['flagged'] > 0): ?>
+    <div class="alert-banner" style="background:#FEF2F2;border-color:#FECACA;">
+        <div class="alert-banner-text" style="color:#991B1B;">
+            <strong><?= $stats['flagged'] ?></strong>
+            review<?= $stats['flagged'] === 1 ? '' : 's' ?> flagged by students
+        </div>
+        <a href="admin_reviews.php?filter=flagged" class="alert-banner-link" style="background:var(--danger);">See flagged →</a>
+    </div>
+    <?php endif; ?>
+
+    <!-- ── Platform stats ── -->
+    <div class="section-label">Platform Overview</div>
     <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-num"><?= (int)$stats['total_reviews'] ?></div>
-            <div class="stat-label">Total Reviews</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num warning"><?= (int)$stats['pending'] ?></div>
-            <div class="stat-label">Pending</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num"><?= (int)$stats['approved'] ?></div>
-            <div class="stat-label">Approved</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num danger"><?= (int)$stats['flagged'] ?></div>
-            <div class="stat-label">Flagged</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num"><?= (int)$stats['total_users'] ?></div>
-            <div class="stat-label">Students</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num"><?= (int)$stats['total_courses'] ?></div>
-            <div class="stat-label">Courses</div>
-        </div>
-    </div>
-
-    <!-- ── Top Reviewed Courses ── -->
-    <?php if (!empty($topCourses)): ?>
-    <div class="section-head">
-        <div class="section-title">Most Reviewed Courses</div>
-    </div>
-    <div class="top-table">
-        <table>
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Code</th>
-                    <th>Title</th>
-                    <th style="text-align:right;">Reviews</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($topCourses as $i => $tc): ?>
-                <tr>
-                    <td style="color:var(--muted);"><?= $i + 1 ?></td>
-                    <td class="course-code-cell"><?= e($tc['code']) ?></td>
-                    <td><?= e($tc['title']) ?></td>
-                    <td style="text-align:right;font-weight:700;"><?= (int)$tc['cnt'] ?></td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php endif; ?>
-
-    <!-- ── Moderation queue ── -->
-    <div class="section-title" style="margin-bottom:10px;">Review Moderation</div>
-
-    <div class="tabs">
-        <a href="admin.php?tab=pending" class="tab-link <?= $tab === 'pending' ? 'active' : '' ?>">
-            Pending <?php if ($stats['pending'] > 0): ?><span class="tab-badge"><?= (int)$stats['pending'] ?></span><?php endif; ?>
+        <a href="admin_students.php" class="stat-card clickable theme-blue">
+            <div class="stat-icon">🎓</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['students'] ?></div>
+                <div class="stat-name">Students</div>
+            </div>
         </a>
-        <a href="admin.php?tab=flagged" class="tab-link <?= $tab === 'flagged' ? 'active' : '' ?>">
-            Flagged <?php if ($stats['flagged'] > 0): ?><span class="tab-badge"><?= (int)$stats['flagged'] ?></span><?php endif; ?>
+        <a href="admin_teachers.php" class="stat-card clickable theme-purple">
+            <div class="stat-icon">👨‍🏫</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['teachers'] ?></div>
+                <div class="stat-name">Teachers</div>
+            </div>
         </a>
-        <a href="admin.php?tab=all" class="tab-link <?= $tab === 'all' ? 'active' : '' ?>">All</a>
+        <a href="admin_courses.php" class="stat-card clickable theme-orange">
+            <div class="stat-icon">📚</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['courses'] ?></div>
+                <div class="stat-name">Courses</div>
+            </div>
+        </a>
+        <a href="admin_reviews.php?filter=pending" class="stat-card clickable theme-yellow">
+            <div class="stat-icon">⏳</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['pending'] ?></div>
+                <div class="stat-name">Pending</div>
+            </div>
+        </a>
+        <a href="admin_reviews.php?filter=approved" class="stat-card clickable theme-green">
+            <div class="stat-icon">✅</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['approved'] ?></div>
+                <div class="stat-name">Approved</div>
+            </div>
+        </a>
+        <a href="admin_reviews.php?filter=flagged" class="stat-card clickable theme-red">
+            <div class="stat-icon">🚩</div>
+            <div class="stat-body">
+                <div class="stat-num"><?= $stats['flagged'] ?></div>
+                <div class="stat-name">Flagged</div>
+            </div>
+        </a>
     </div>
 
-    <?php if (empty($reviews)): ?>
-        <div class="rev-card empty-state" style="box-shadow:none;border:1px solid var(--border);">
-            <div class="emoji"><?= $tab === 'pending' ? '✅' : ($tab === 'flagged' ? '🏳️' : '📭') ?></div>
-            <?php if ($tab === 'pending'): ?>
-                No pending reviews. All caught up!
-            <?php elseif ($tab === 'flagged'): ?>
-                No flagged reviews right now.
+    <!-- ── Approval rate ring ── -->
+    <?php
+    $pct = $stats['total_reviews'] > 0
+        ? round(($stats['approved'] / $stats['total_reviews']) * 100)
+        : 0;
+    $circumference = 2 * M_PI * 28; // radius = 28
+    $offset = $circumference - ($pct / 100) * $circumference;
+    ?>
+    <div class="approval-wrap">
+        <div class="ring-wrap">
+            <svg class="ring-svg" width="64" height="64" viewBox="0 0 64 64">
+                <circle class="ring-bg"   cx="32" cy="32" r="28"/>
+                <circle class="ring-fill" cx="32" cy="32" r="28"
+                    stroke-dasharray="<?= round($circumference, 2) ?>"
+                    stroke-dashoffset="<?= round($offset, 2) ?>"/>
+            </svg>
+            <div class="ring-label"><?= $pct ?>%</div>
+        </div>
+        <div class="approval-text-wrap">
+            <div class="approval-title">Approval rate</div>
+            <div class="approval-sub">
+                <?= $stats['approved'] ?> of <?= $stats['total_reviews'] ?> total
+                review<?= $stats['total_reviews'] === 1 ? '' : 's' ?> approved and live.
+                <?php if ($stats['pending'] > 0): ?>
+                    <?= $stats['pending'] ?> still pending.
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Quick actions ── -->
+    <div class="section-label">Manage</div>
+    <div class="actions-grid">
+        <a href="admin_reviews.php" class="action-card">
+            <div class="action-icon">📝</div>
+            <div class="action-body">
+                <div class="action-title">Moderation</div>
+                <div class="action-sub">Approve, flag, delete reviews</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+        <a href="admin_courses.php" class="action-card">
+            <div class="action-icon">📚</div>
+            <div class="action-body">
+                <div class="action-title">Courses</div>
+                <div class="action-sub">Add, edit, remove courses</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+        <a href="admin_teachers.php" class="action-card">
+            <div class="action-icon">👨‍🏫</div>
+            <div class="action-body">
+                <div class="action-title">Teachers</div>
+                <div class="action-sub">Manage faculty profiles</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+        <a href="admin_sessions.php" class="action-card">
+            <div class="action-icon">📅</div>
+            <div class="action-body">
+                <div class="action-title">Sessions</div>
+                <div class="action-sub">Set the active semester</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+        <a href="admin_students.php" class="action-card">
+            <div class="action-icon">🎓</div>
+            <div class="action-body">
+                <div class="action-title">Students</div>
+                <div class="action-sub">View registered users</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+        <a href="index.php" class="action-card" target="_blank">
+            <div class="action-icon">🌐</div>
+            <div class="action-body">
+                <div class="action-title">Public Site</div>
+                <div class="action-sub">Preview the landing page</div>
+            </div>
+            <span class="action-arrow">›</span>
+        </a>
+    </div>
+
+    <!-- ── Recent pending + flagged ── -->
+    <div class="section-label">Recent Activity</div>
+    <div class="two-col">
+
+        <!-- Pending -->
+        <div class="list-card">
+            <div class="list-card-header">
+                <div class="list-card-title">
+                    ⏳ Pending
+                    <span class="list-badge badge-yellow"><?= $stats['pending'] ?></span>
+                </div>
+                <a href="admin_reviews.php?filter=pending" class="list-view-all">View all →</a>
+            </div>
+            <?php if (empty($recentPending)): ?>
+                <div class="empty-list">🎉 No pending reviews</div>
             <?php else: ?>
-                No reviews in the system yet.
-            <?php endif; ?>
-        </div>
-    <?php else: ?>
-        <?php foreach ($reviews as $rev): ?>
-        <div class="rev-card <?= $rev['is_flagged'] ? 'is-flagged' : '' ?>">
-            <div class="rev-meta">
-                <div>
-                    <div class="rev-course">
-                        <span><?= e($rev['course_code']) ?></span> — <?= e($rev['course_title']) ?>
+                <?php foreach ($recentPending as $r): ?>
+                <div class="review-row">
+                    <div class="review-row-icon icon-yellow">⏳</div>
+                    <div class="review-row-body">
+                        <div class="review-row-course"><?= e($r['course_code']) ?> · <?= e($r['teacher_name']) ?></div>
+                        <div class="review-row-meta">
+                            <span class="review-row-stars"><?= starDisplay((float)$r['rating_overall']) ?></span>
+                            · <?= e($r['student_id']) ?> · <?= timeAgo($r['created_at']) ?>
+                        </div>
                     </div>
-                    <div class="rev-prof"><?= e($rev['professor_name']) ?> · <?= e($rev['semester']) ?></div>
                 </div>
-                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;">
-                    <?php if ($rev['is_flagged']): ?>
-                        <span class="badge badge-flagged">🚩 Flagged</span>
-                    <?php endif; ?>
-                    <?php if ($rev['is_approved']): ?>
-                        <span class="badge badge-approved">Live</span>
-                    <?php else: ?>
-                        <span class="badge badge-pending">Pending</span>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <div class="rev-ratings">
-                <span class="mini-tag">Overall <strong><?= (int)$rev['rating_overall'] ?>/5</strong></span>
-                <span class="mini-tag">Teaching <strong><?= (int)$rev['rating_teaching'] ?>/5</strong></span>
-                <span class="mini-tag">Workload <strong><?= (int)$rev['rating_workload'] ?>/5</strong></span>
-                <span class="mini-tag">Grading <strong><?= (int)$rev['rating_grading'] ?>/5</strong></span>
-            </div>
-
-            <?php if (!empty($rev['comment'])): ?>
-                <div class="rev-comment"><?= e($rev['comment']) ?></div>
-            <?php else: ?>
-                <div class="rev-comment" style="color:var(--muted);font-style:italic;">No written comment.</div>
+                <?php endforeach; ?>
             <?php endif; ?>
-
-            <div class="rev-author">
-                By <strong><?= e($rev['student_name']) ?></strong>
-                (<?= e($rev['student_email']) ?>)
-                · <?= e(timeAgo($rev['created_at'])) ?>
-                · Review #<?= (int)$rev['id'] ?>
-            </div>
-
-            <div class="action-row">
-                <?php if (!$rev['is_approved']): ?>
-                <form method="POST" action="admin.php?tab=<?= e($tab) ?>" style="display:contents;">
-                    <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
-                    <input type="hidden" name="review_id" value="<?= (int)$rev['id'] ?>">
-                    <input type="hidden" name="action" value="approve">
-                    <button class="btn btn-approve" type="submit">✅ Approve</button>
-                </form>
-                <?php endif; ?>
-
-                <?php if ($rev['is_flagged']): ?>
-                <form method="POST" action="admin.php?tab=<?= e($tab) ?>" style="display:contents;">
-                    <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
-                    <input type="hidden" name="review_id" value="<?= (int)$rev['id'] ?>">
-                    <input type="hidden" name="action" value="unflag">
-                    <button class="btn btn-unflag" type="submit">🏳️ Dismiss Flag</button>
-                </form>
-                <?php endif; ?>
-
-                <form method="POST" action="admin.php?tab=<?= e($tab) ?>" style="display:contents;"
-                      onsubmit="return confirm('Delete this review permanently?')">
-                    <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
-                    <input type="hidden" name="review_id" value="<?= (int)$rev['id'] ?>">
-                    <input type="hidden" name="action" value="delete">
-                    <button class="btn btn-delete" type="submit">🗑️ Delete</button>
-                </form>
-
-                <a href="course_detail.php?id=<?= (int)$rev['id'] ?>" class="btn btn-view" target="_blank">
-                    🔗 View Course
-                </a>
-            </div>
         </div>
-        <?php endforeach; ?>
 
-        <!-- ── Pagination ── -->
-        <?php if ($totalPages > 1): ?>
-        <div class="pagination">
-            <?php
-                $prev = max(1, $page - 1);
-                $next = min($totalPages, $page + 1);
-            ?>
-            <a href="admin.php?tab=<?= $tab ?>&page=<?= $prev ?>" class="page-link <?= $page === 1 ? 'disabled' : '' ?>">‹</a>
-            <?php for ($p = 1; $p <= $totalPages; $p++): ?>
-                <a href="admin.php?tab=<?= $tab ?>&page=<?= $p ?>" class="page-link <?= $p === $page ? 'active' : '' ?>"><?= $p ?></a>
-            <?php endfor; ?>
-            <a href="admin.php?tab=<?= $tab ?>&page=<?= $next ?>" class="page-link <?= $page === $totalPages ? 'disabled' : '' ?>">›</a>
+        <!-- Flagged -->
+        <div class="list-card">
+            <div class="list-card-header">
+                <div class="list-card-title">
+                    🚩 Flagged
+                    <span class="list-badge badge-red"><?= $stats['flagged'] ?></span>
+                </div>
+                <a href="admin_reviews.php?filter=flagged" class="list-view-all">View all →</a>
+            </div>
+            <?php if (empty($recentFlagged)): ?>
+                <div class="empty-list">✅ No flagged reviews</div>
+            <?php else: ?>
+                <?php foreach ($recentFlagged as $r): ?>
+                <div class="review-row">
+                    <div class="review-row-icon icon-red">🚩</div>
+                    <div class="review-row-body">
+                        <div class="review-row-course"><?= e($r['course_code']) ?> · <?= e($r['teacher_name']) ?></div>
+                        <div class="review-row-meta">
+                            <span class="review-row-stars"><?= starDisplay((float)$r['rating_overall']) ?></span>
+                            · <?= e($r['student_id']) ?> · <?= timeAgo($r['created_at']) ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
         </div>
-        <?php endif; ?>
-    <?php endif; ?>
+
+    </div>
 
 </div>
+
+<!-- ── Admin bottom nav ── -->
+<nav class="bottombar">
+    <a href="admin.php"          class="nav-item active"><span class="icon">🏠</span><span>Dashboard</span></a>
+    <a href="admin_reviews.php"  class="nav-item"><span class="icon">📝</span><span>Reviews</span></a>
+    <a href="admin_courses.php"  class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
+    <a href="admin_teachers.php" class="nav-item"><span class="icon">👨‍🏫</span><span>Teachers</span></a>
+    <a href="admin_students.php" class="nav-item"><span class="icon">🎓</span><span>Students</span></a>
+</nav>
+
 </body>
 </html>

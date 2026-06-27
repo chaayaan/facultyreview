@@ -1,403 +1,336 @@
 <?php
 // ============================================================
 //  FacultyReview — admin_courses.php
-//  Manage courses: add, edit, delete.
+//  Add / edit / delete courses. Delete blocked if reviews exist.
 // ============================================================
 require_once 'db.php';
 requireAdmin();
 
-$adminName = $_SESSION['user_name'];
-$flash = '';
-$errors = [];
+if (session_status() === PHP_SESSION_NONE) session_start();
+
+$errors  = [];
+$success = '';
 $editCourse = null;
 
-// ── Handle POST ─────────────────────────────────────────────
+// ── POST handler ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrf();
     $action = $_POST['action'] ?? '';
 
-    // ── ADD ──────────────────────────────────────────────────
+    // ── ADD ──
     if ($action === 'add') {
-        $code        = trim($_POST['code']        ?? '');
-        $title       = trim($_POST['title']       ?? '');
-        $deptId      = (int)($_POST['department_id'] ?? 0);
-        $creditHours = (int)($_POST['credit_hours']  ?? 3);
+        $code   = trim($_POST['code']   ?? '');
+        $name   = trim($_POST['name']   ?? '');
+        $sem    = (int)($_POST['semester'] ?? 0);
+        $credit = (float)($_POST['credit'] ?? 0);
 
-        if ($code === '')                       $errors[] = 'Course code is required.';
-        if (strlen($code) > 20)                 $errors[] = 'Course code must be 20 characters or fewer.';
-        if ($title === '')                       $errors[] = 'Course title is required.';
-        if (strlen($title) > 150)               $errors[] = 'Title must be 150 characters or fewer.';
-        if ($creditHours < 1 || $creditHours > 6) $errors[] = 'Credit hours must be between 1 and 6.';
+        if ($code   === '') $errors[] = 'Course code is required.';
+        if ($name   === '') $errors[] = 'Course name is required.';
+        if ($sem < 1 || $sem > 8)       $errors[] = 'Semester must be 1–8.';
+        if ($credit <= 0 || $credit > 6) $errors[] = 'Credit hours must be between 0.25 and 6.';
 
         if (empty($errors)) {
-            $stmt = $mysqli->prepare("INSERT INTO courses (code, title, department_id, credit_hours) VALUES (?, ?, ?, ?)");
-            $deptIdVal = $deptId > 0 ? $deptId : null;
-            $stmt->bind_param('ssii', $code, $title, $deptIdVal, $creditHours);
+            $stmt = $mysqli->prepare("INSERT INTO courses (code, name, semester, credit) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param('ssid', $code, $name, $sem, $credit);
             if ($stmt->execute()) {
-                $flash = "Course \"$code — $title\" added successfully.";
+                $_SESSION['flash'] = '✅ Course added successfully.';
+                redirect('admin_courses.php');
             } else {
-                $errors[] = 'Failed to add course. Code may already exist.';
+                $errors[] = $mysqli->errno === 1062
+                    ? "Course code \"$code\" already exists."
+                    : 'Failed to add course. Please try again.';
             }
             $stmt->close();
         }
+    }
 
-    // ── EDIT SAVE ────────────────────────────────────────────
-    } elseif ($action === 'edit_save') {
-        $id          = (int)($_POST['id']            ?? 0);
-        $code        = trim($_POST['code']           ?? '');
-        $title       = trim($_POST['title']          ?? '');
-        $deptId      = (int)($_POST['department_id'] ?? 0);
-        $creditHours = (int)($_POST['credit_hours']  ?? 3);
+    // ── EDIT ──
+    if ($action === 'edit') {
+        $id     = (int)($_POST['course_id'] ?? 0);
+        $code   = trim($_POST['code']   ?? '');
+        $name   = trim($_POST['name']   ?? '');
+        $sem    = (int)($_POST['semester'] ?? 0);
+        $credit = (float)($_POST['credit'] ?? 0);
 
-        if (!$id)                                 $errors[] = 'Invalid course ID.';
-        if ($code === '')                         $errors[] = 'Course code is required.';
-        if (strlen($code) > 20)                   $errors[] = 'Course code must be 20 characters or fewer.';
-        if ($title === '')                        $errors[] = 'Course title is required.';
-        if ($creditHours < 1 || $creditHours > 6) $errors[] = 'Credit hours must be between 1 and 6.';
+        if ($code   === '') $errors[] = 'Course code is required.';
+        if ($name   === '') $errors[] = 'Course name is required.';
+        if ($sem < 1 || $sem > 8)       $errors[] = 'Semester must be 1–8.';
+        if ($credit <= 0 || $credit > 6) $errors[] = 'Credit hours must be between 0.25 and 6.';
 
         if (empty($errors)) {
-            $deptIdVal = $deptId > 0 ? $deptId : null;
-            $stmt = $mysqli->prepare("UPDATE courses SET code = ?, title = ?, department_id = ?, credit_hours = ? WHERE id = ?");
-            $stmt->bind_param('ssiii', $code, $title, $deptIdVal, $creditHours, $id);
-            $stmt->execute();
+            $stmt = $mysqli->prepare("UPDATE courses SET code=?, name=?, semester=?, credit=? WHERE id=?");
+            $stmt->bind_param('ssidi', $code, $name, $sem, $credit, $id);
+            if ($stmt->execute()) {
+                $_SESSION['flash'] = '✅ Course updated.';
+                redirect('admin_courses.php');
+            } else {
+                $errors[] = $mysqli->errno === 1062
+                    ? "Course code \"$code\" already exists."
+                    : 'Failed to update course.';
+            }
             $stmt->close();
-            $flash = "Course updated.";
         }
+        // Reload edit form with errors
+        if (!empty($errors)) {
+            $editCourse = ['id' => $id, 'code' => $code, 'name' => $name, 'semester' => $sem, 'credit' => $credit];
+        }
+    }
 
-    // ── DELETE ───────────────────────────────────────────────
-    } elseif ($action === 'delete') {
-        $id = (int)($_POST['id'] ?? 0);
-        if ($id > 0) {
+    // ── DELETE ──
+    if ($action === 'delete') {
+        $id = (int)($_POST['course_id'] ?? 0);
+        // Block if reviews exist
+        $stmt = $mysqli->prepare("SELECT COUNT(*) AS n FROM reviews WHERE course_id = ?");
+        $stmt->bind_param('i', $id); $stmt->execute();
+        $cnt = (int)$stmt->get_result()->fetch_assoc()['n'];
+        $stmt->close();
+        if ($cnt > 0) {
+            $_SESSION['flash'] = "⚠️ Cannot delete: this course has $cnt review(s). Remove them first.";
+        } else {
             $stmt = $mysqli->prepare("DELETE FROM courses WHERE id = ?");
-            $stmt->bind_param('i', $id);
-            $stmt->execute();
-            $stmt->close();
-            $flash = 'Course deleted.';
+            $stmt->bind_param('i', $id); $stmt->execute(); $stmt->close();
+            $_SESSION['flash'] = '🗑️ Course deleted.';
         }
+        redirect('admin_courses.php');
     }
 }
 
-// ── Load edit target ─────────────────────────────────────────
+// ── Load edit target from GET ──
 if (isset($_GET['edit'])) {
     $editId = (int)$_GET['edit'];
-    $stmt = $mysqli->prepare("SELECT * FROM courses WHERE id = ?");
-    $stmt->bind_param('i', $editId);
-    $stmt->execute();
+    $stmt = $mysqli->prepare("SELECT id, code, name, semester, credit FROM courses WHERE id = ?");
+    $stmt->bind_param('i', $editId); $stmt->execute();
     $editCourse = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 }
 
-// ── Load data ─────────────────────────────────────────────────
-$departments = $mysqli->query("SELECT id, name FROM departments ORDER BY name")->fetch_all(MYSQLI_ASSOC);
+$flash = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']);
 
-$search   = trim($_GET['q'] ?? '');
-$deptFilter = (int)($_GET['dept'] ?? 0);
-$page     = max(1, (int)($_GET['page'] ?? 1));
-$perPage  = 15;
-$offset   = ($page - 1) * $perPage;
+// ── Fetch all courses with review count ──
+$semFilter = (int)($_GET['sem'] ?? 0);
+$whereClause = $semFilter >= 1 && $semFilter <= 8 ? "WHERE c.semester = $semFilter" : '';
 
-$where  = [];
-$params = [];
-$types  = '';
-
-if ($search !== '') {
-    $where[]  = "(c.code LIKE ? OR c.title LIKE ?)";
-    $like     = "%$search%";
-    $params[] = $like;
-    $params[] = $like;
-    $types   .= 'ss';
-}
-if ($deptFilter > 0) {
-    $where[]  = "c.department_id = ?";
-    $params[] = $deptFilter;
-    $types   .= 'i';
-}
-
-$whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-
-// Count
-$countSql  = "SELECT COUNT(*) AS c FROM courses c $whereSql";
-$countStmt = $mysqli->prepare($countSql);
-if ($params) $countStmt->bind_param($types, ...$params);
-$countStmt->execute();
-$totalCourses = $countStmt->get_result()->fetch_assoc()['c'];
-$countStmt->close();
-
-// List
-$listSql  = "
-    SELECT c.id, c.code, c.title, c.credit_hours,
-           d.name AS dept_name,
-           COUNT(DISTINCT r.id) AS review_count,
-           ROUND(AVG(r.rating_overall), 1) AS avg_rating
+$courses = $mysqli->query("
+    SELECT c.id, c.code, c.name, c.semester, c.credit,
+           COUNT(r.id) AS review_count
     FROM courses c
-    LEFT JOIN departments d ON d.id = c.department_id
-    LEFT JOIN reviews r ON r.course_id = c.id AND r.is_approved = 1
-    $whereSql
+    LEFT JOIN reviews r ON r.course_id = c.id
+    $whereClause
     GROUP BY c.id
-    ORDER BY c.code ASC
-    LIMIT $perPage OFFSET $offset
-";
-$listStmt = $mysqli->prepare($listSql);
-if ($params) $listStmt->bind_param($types, ...$params);
-$listStmt->execute();
-$courses = $listStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$listStmt->close();
+    ORDER BY c.semester ASC, c.code ASC
+")->fetch_all(MYSQLI_ASSOC);
 
-$totalPages = (int)ceil($totalCourses / $perPage);
+$csrf = csrfToken();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Manage Courses — Admin</title>
-<style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-        --brand: #4F46E5; --brand-dark: #3730A3; --brand-soft: #EEF2FF;
-        --danger: #EF4444; --danger-soft: #FEF2F2;
-        --success: #22C55E; --success-soft: #DCFCE7;
-        --warning: #EAB308;
-        --bg: #F1F5F9; --card: #FFFFFF; --text: #1E293B;
-        --muted: #64748B; --border: #E2E8F0;
-        --radius: 14px; --shadow: 0 4px 24px rgba(0,0,0,.06);
-    }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 40px; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Courses — FacultyReview Admin</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --brand: #4F46E5; --brand-dark: #3730A3; --brand-soft: #EEF2FF;
+            --danger: #EF4444; --danger-soft: #FEF2F2;
+            --success: #22C55E; --success-soft: #F0FDF4;
+            --warning: #EAB308; --warning-soft: #FEFCE8;
+            --bg: #F1F5F9; --card: #FFFFFF; --text: #1E293B;
+            --muted: #64748B; --border: #E2E8F0;
+            --radius: 14px; --shadow: 0 2px 12px rgba(0,0,0,.06);
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
 
-    .topbar { position: sticky; top: 0; z-index: 50; background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; }
-    .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-    .topbar-icon { width: 32px; height: 32px; background: var(--brand); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-    .topbar-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-    .topbar-name span { color: var(--brand); }
-    .topbar-right { display: flex; align-items: center; gap: 8px; }
-    .admin-badge { background: var(--brand); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
-    .topbar-link { font-size: 0.82rem; color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 8px; }
-    .topbar-link:hover { background: var(--bg); color: var(--text); }
+        .topbar { background: var(--brand); padding: 0 16px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 16px rgba(79,70,229,.25); }
+        .topbar-logo { font-size: 1rem; font-weight: 800; color: #fff; }
+        .topbar-logo span { opacity: .7; font-weight: 400; }
+        .admin-chip { background: rgba(255,255,255,.18); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
+        .logout-btn { background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 0.76rem; font-weight: 700; text-decoration: none; }
+        .logout-btn:hover { background: rgba(255,255,255,.28); }
+        .topbar-left { display: flex; align-items: center; gap: 10px; }
 
-    .admin-nav { background: var(--brand); display: flex; gap: 2px; padding: 0 12px; overflow-x: auto; }
-    .admin-nav a { color: rgba(255,255,255,.75); text-decoration: none; padding: 11px 14px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; border-bottom: 2px solid transparent; }
-    .admin-nav a:hover { color: #fff; }
-    .admin-nav a.active { color: #fff; border-bottom-color: #fff; }
+        .container { max-width: 720px; margin: 0 auto; padding: 16px 14px; }
+        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 4px; }
+        .page-sub { font-size: 0.8rem; color: var(--muted); margin-bottom: 16px; }
 
-    .container { max-width: 860px; margin: 0 auto; padding: 20px 14px; }
-    .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-    .page-title { font-size: 1.3rem; font-weight: 700; }
-    .page-sub { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
+        .flash { border-radius: 10px; padding: 11px 14px; font-size: 0.84rem; margin-bottom: 14px; font-weight: 600; border-left: 4px solid; }
+        .flash-success { background: var(--success-soft); border-color: var(--success); color: #166534; }
+        .flash-warning { background: var(--warning-soft); border-color: var(--warning); color: #92400E; }
 
-    .flash { background: var(--success-soft); border-left: 4px solid var(--success); color: #166534; padding: 12px 14px; border-radius: 10px; font-size: 0.85rem; margin-bottom: 16px; }
-    .alert-error { background: var(--danger-soft); border-left: 4px solid var(--danger); color: #991B1B; padding: 12px 14px; border-radius: 10px; font-size: 0.85rem; margin-bottom: 16px; }
-    .alert-error ul { padding-left: 16px; margin-top: 4px; }
+        /* Form card */
+        .form-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 16px; margin-bottom: 18px; }
+        .form-card-title { font-size: 0.9rem; font-weight: 800; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        .form-group.full { grid-column: 1 / -1; }
+        label { font-size: 0.74rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+        input[type=text], input[type=number], select {
+            padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px;
+            font-size: 0.9rem; color: var(--text); background: #FAFAFA; outline: none;
+            font-family: inherit; transition: border-color .2s, box-shadow .2s;
+        }
+        input:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); background: #fff; }
+        .form-actions { display: flex; gap: 8px; margin-top: 4px; }
+        .btn { padding: 10px 18px; border-radius: 9px; font-size: 0.85rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; transition: opacity .15s; }
+        .btn-primary { background: var(--brand); color: #fff; }
+        .btn-primary:hover { background: var(--brand-dark); }
+        .btn-ghost { background: var(--bg); color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; }
+        .btn-ghost:hover { background: var(--border); }
+        .errors { background: var(--danger-soft); border-left: 4px solid var(--danger); border-radius: 10px; padding: 10px 13px; margin-bottom: 12px; font-size: 0.82rem; color: #991B1B; }
+        .errors ul { padding-left: 15px; margin-top: 3px; }
 
-    .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; margin-bottom: 20px; }
-    .card-title { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
+        /* Semester filter chips */
+        .sem-filter { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 14px; scrollbar-width: none; }
+        .sem-filter::-webkit-scrollbar { display: none; }
+        .sem-chip { padding: 5px 13px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-decoration: none; white-space: nowrap; background: var(--card); color: var(--muted); border: 1.5px solid var(--border); transition: all .15s; }
+        .sem-chip:hover { border-color: var(--brand); color: var(--brand); }
+        .sem-chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .form-row.three { grid-template-columns: 1fr 1fr 1fr; }
-    @media (max-width: 540px) { .form-row, .form-row.three { grid-template-columns: 1fr; } }
-    .form-group { margin-bottom: 12px; }
-    label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .03em; }
-    input[type=text], input[type=number], select, textarea {
-        width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 9px;
-        font-size: 0.9rem; color: var(--text); background: #FAFAFA;
-        outline: none; transition: border-color .2s, box-shadow .2s; -webkit-appearance: none;
-    }
-    input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.1); background: #fff; }
-    .btn { padding: 9px 18px; border: none; border-radius: 9px; font-size: 0.88rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: opacity .15s, transform .1s; }
-    .btn:active { transform: scale(.97); }
-    .btn-primary { background: var(--brand); color: #fff; }
-    .btn-primary:hover { background: var(--brand-dark); }
-    .btn-danger { background: var(--danger-soft); color: var(--danger); }
-    .btn-danger:hover { background: #FCA5A5; }
-    .btn-edit { background: var(--brand-soft); color: var(--brand); }
-    .btn-edit:hover { background: #C7D2FE; }
-    .btn-sm { padding: 6px 12px; font-size: 0.78rem; }
-    .btn-cancel { background: var(--bg); color: var(--muted); }
-    .btn-cancel:hover { background: var(--border); }
+        /* Table */
+        .table-wrap { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        th { padding: 10px 12px; background: var(--bg); color: var(--muted); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; text-align: left; border-bottom: 1px solid var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #FAFAFA; }
+        .course-code { font-weight: 800; color: var(--brand); font-size: 0.85rem; }
+        .course-name { color: var(--text); font-size: 0.8rem; }
+        .sem-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; background: var(--brand-soft); color: var(--brand-dark); font-size: 0.68rem; font-weight: 700; }
+        .review-cnt { font-size: 0.75rem; color: var(--muted); }
+        .review-cnt.has { color: var(--warning); font-weight: 700; }
+        .action-btns { display: flex; gap: 6px; }
+        .btn-edit { padding: 5px 11px; background: var(--brand-soft); color: var(--brand-dark); border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; text-decoration: none; font-family: inherit; }
+        .btn-edit:hover { background: #E0E7FF; }
+        .btn-del { padding: 5px 11px; background: var(--danger-soft); color: var(--danger); border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+        .btn-del:hover { background: #FEE2E2; }
+        .btn-del:disabled { opacity: .4; cursor: not-allowed; }
+        .empty-row td { text-align: center; padding: 30px; color: var(--muted); }
 
-    .filter-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-end; }
-    .filter-row .form-group { margin-bottom: 0; flex: 1; min-width: 160px; }
-    .filter-row .form-group label { margin-bottom: 4px; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
-    thead th { padding: 10px 12px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1.5px solid var(--border); white-space: nowrap; }
-    tbody tr { border-bottom: 1px solid var(--border); }
-    tbody tr:last-child { border-bottom: none; }
-    tbody td { padding: 11px 12px; vertical-align: middle; }
-    tbody tr:hover { background: #FAFAFA; }
-    .course-code { font-weight: 700; color: var(--brand); font-size: 0.8rem; }
-    .course-title { font-weight: 600; }
-    .dept-tag { font-size: 0.72rem; color: var(--muted); }
-    .review-count { font-size: 0.8rem; font-weight: 600; }
-    .stars { color: var(--warning); font-size: 0.8rem; }
-    .actions { display: flex; gap: 6px; }
-    .empty-row td { text-align: center; color: var(--muted); padding: 28px; }
-
-    .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 16px; flex-wrap: wrap; }
-    .page-link { min-width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--card); border: 1.5px solid var(--border); color: var(--text); text-decoration: none; font-size: 0.82rem; font-weight: 600; padding: 0 8px; }
-    .page-link.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-    .page-link.disabled { opacity: .4; pointer-events: none; }
-
-    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
-    .modal-overlay.open { display: flex; }
-    .modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
-    .modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; }
-    .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
-</style>
+        .bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); }
+        .nav-item { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 0.6rem; font-weight: 600; flex: 1; padding: 4px 0; }
+        .nav-item .icon { font-size: 1.15rem; line-height: 1; }
+        .nav-item.active { color: var(--brand); }
+    </style>
 </head>
 <body>
 
 <header class="topbar">
-    <a href="admin.php" class="topbar-brand">
-        <div class="topbar-icon">🎓</div>
-        <span class="topbar-name">Faculty<span>Review</span></span>
-    </a>
-    <div class="topbar-right">
-        <span class="admin-badge">Admin</span>
-        <a href="logout.php" class="topbar-link">Logout</a>
+    <div class="topbar-left">
+        <div class="topbar-logo">Faculty<span>Review</span></div>
+        <span class="admin-chip">Admin</span>
     </div>
+    <a href="logout.php" class="logout-btn">Logout</a>
 </header>
 
-<nav class="admin-nav">
-    <a href="admin.php">📊 Dashboard</a>
-    <a href="admin_courses.php" class="active">📚 Courses</a>
-    <a href="admin_professors.php">👨‍🏫 Professors</a>
-    <a href="admin_students.php">👥 Students</a>
-</nav>
-
 <div class="container">
+    <div class="page-title">📚 Manage Courses</div>
+    <div class="page-sub">Add, edit, or remove courses across all semesters.</div>
 
     <?php if ($flash): ?>
-        <div class="flash">✅ <?= e($flash) ?></div>
-    <?php endif; ?>
-    <?php if (!empty($errors)): ?>
-        <div class="alert-error"><ul><?php foreach ($errors as $err): ?><li><?= e($err) ?></li><?php endforeach; ?></ul></div>
+        <div class="flash <?= str_contains($flash, '⚠️') ? 'flash-warning' : 'flash-success' ?>"><?= e($flash) ?></div>
     <?php endif; ?>
 
-    <!-- ── Add / Edit Form ── -->
-    <div class="card">
-        <div class="card-title"><?= $editCourse ? '✏️ Edit Course' : '➕ Add New Course' ?></div>
-        <form method="POST" action="admin_courses.php<?= $editCourse ? '?edit=' . (int)$editCourse['id'] : '' ?>">
-            <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
-            <input type="hidden" name="action" value="<?= $editCourse ? 'edit_save' : 'add' ?>">
+    <!-- Add / Edit form -->
+    <div class="form-card">
+        <div class="form-card-title">
+            <?= $editCourse ? '✏️ Edit Course' : '➕ Add New Course' ?>
+        </div>
+
+        <?php if (!empty($errors)): ?>
+            <div class="errors"><ul><?php foreach ($errors as $err): ?><li><?= e($err) ?></li><?php endforeach; ?></ul></div>
+        <?php endif; ?>
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
+            <input type="hidden" name="action" value="<?= $editCourse ? 'edit' : 'add' ?>">
             <?php if ($editCourse): ?>
-                <input type="hidden" name="id" value="<?= (int)$editCourse['id'] ?>">
+                <input type="hidden" name="course_id" value="<?= (int)$editCourse['id'] ?>">
             <?php endif; ?>
 
-            <div class="form-row three">
+            <div class="form-grid">
                 <div class="form-group">
                     <label for="code">Course Code</label>
-                    <input type="text" id="code" name="code" placeholder="e.g. CSE301" maxlength="20"
+                    <input type="text" id="code" name="code" placeholder="e.g. CSE 1113" maxlength="20"
                            value="<?= e($editCourse['code'] ?? '') ?>" required>
                 </div>
                 <div class="form-group">
-                    <label for="department_id">Department</label>
-                    <select id="department_id" name="department_id">
-                        <option value="0">— No Department —</option>
-                        <?php foreach ($departments as $d): ?>
-                            <option value="<?= (int)$d['id'] ?>"
-                                <?= ((int)($editCourse['department_id'] ?? 0) === (int)$d['id']) ? 'selected' : '' ?>>
-                                <?= e($d['name']) ?>
+                    <label for="semester">Semester</label>
+                    <select id="semester" name="semester" required>
+                        <option value="">— Select —</option>
+                        <?php for ($i = 1; $i <= 8; $i++): ?>
+                            <option value="<?= $i ?>" <?= (int)($editCourse['semester'] ?? 0) === $i ? 'selected' : '' ?>>
+                                <?= semesterLabel($i) ?>
                             </option>
-                        <?php endforeach; ?>
+                        <?php endfor; ?>
                     </select>
                 </div>
+                <div class="form-group full">
+                    <label for="name">Course Name</label>
+                    <input type="text" id="name" name="name" placeholder="e.g. Programming Fundamentals" maxlength="200"
+                           value="<?= e($editCourse['name'] ?? '') ?>" required>
+                </div>
                 <div class="form-group">
-                    <label for="credit_hours">Credit Hours</label>
-                    <input type="number" id="credit_hours" name="credit_hours" min="1" max="6"
-                           value="<?= (int)($editCourse['credit_hours'] ?? 3) ?>" required>
+                    <label for="credit">Credit Hours</label>
+                    <input type="number" id="credit" name="credit" placeholder="e.g. 3.00" step="0.25" min="0.25" max="6"
+                           value="<?= $editCourse ? number_format((float)$editCourse['credit'], 2) : '' ?>" required>
                 </div>
             </div>
-            <div class="form-group">
-                <label for="title">Course Title</label>
-                <input type="text" id="title" name="title" placeholder="e.g. Data Structures & Algorithms" maxlength="150"
-                       value="<?= e($editCourse['title'] ?? '') ?>" required>
-            </div>
 
-            <div style="display:flex;gap:8px;margin-top:4px;">
+            <div class="form-actions" style="margin-top:12px;">
                 <button type="submit" class="btn btn-primary">
                     <?= $editCourse ? '💾 Save Changes' : '➕ Add Course' ?>
                 </button>
                 <?php if ($editCourse): ?>
-                    <a href="admin_courses.php" class="btn btn-cancel">Cancel</a>
+                    <a href="admin_courses.php" class="btn btn-ghost">Cancel</a>
                 <?php endif; ?>
             </div>
         </form>
     </div>
 
-    <!-- ── Course list ── -->
-    <div class="card">
-        <div class="page-head" style="margin-bottom:14px;">
-            <div>
-                <div class="page-title">All Courses</div>
-                <div class="page-sub"><?= (int)$totalCourses ?> total</div>
-            </div>
-        </div>
+    <!-- Semester filter -->
+    <div class="sem-filter">
+        <a href="admin_courses.php" class="sem-chip <?= $semFilter === 0 ? 'active' : '' ?>">All</a>
+        <?php for ($i = 1; $i <= 8; $i++): ?>
+            <a href="?sem=<?= $i ?>" class="sem-chip <?= $semFilter === $i ? 'active' : '' ?>"><?= semesterLabel($i) ?></a>
+        <?php endfor; ?>
+    </div>
 
-        <!-- Filters -->
-        <form method="GET" action="admin_courses.php">
-            <div class="filter-row">
-                <div class="form-group">
-                    <label>Search</label>
-                    <input type="text" name="q" placeholder="Code or title…" value="<?= e($search) ?>">
-                </div>
-                <div class="form-group">
-                    <label>Department</label>
-                    <select name="dept">
-                        <option value="0">All Departments</option>
-                        <?php foreach ($departments as $d): ?>
-                            <option value="<?= (int)$d['id'] ?>" <?= $deptFilter === (int)$d['id'] ? 'selected' : '' ?>><?= e($d['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div style="align-self:flex-end;">
-                    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
-                    <a href="admin_courses.php" class="btn btn-cancel btn-sm" style="margin-left:4px;">Clear</a>
-                </div>
-            </div>
-        </form>
-
-        <div style="overflow-x:auto;">
+    <!-- Courses table -->
+    <div class="table-wrap">
         <table>
             <thead>
                 <tr>
-                    <th>#</th>
                     <th>Code</th>
-                    <th>Title</th>
-                    <th>Department</th>
+                    <th>Course Name</th>
+                    <th>Sem</th>
                     <th>Credits</th>
                     <th>Reviews</th>
-                    <th>Avg ⭐</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($courses)): ?>
-                    <tr><td colspan="8" class="empty-row">No courses found.</td></tr>
+                    <tr class="empty-row"><td colspan="6">No courses found.</td></tr>
                 <?php else: ?>
                     <?php foreach ($courses as $c): ?>
                     <tr>
-                        <td style="color:var(--muted);font-size:0.78rem;"><?= (int)$c['id'] ?></td>
                         <td><span class="course-code"><?= e($c['code']) ?></span></td>
-                        <td><span class="course-title"><?= e($c['title']) ?></span></td>
-                        <td><span class="dept-tag"><?= e($c['dept_name'] ?? '—') ?></span></td>
-                        <td style="text-align:center;"><?= (int)$c['credit_hours'] ?></td>
-                        <td><span class="review-count"><?= (int)$c['review_count'] ?></span></td>
+                        <td><span class="course-name"><?= e($c['name']) ?></span></td>
+                        <td><span class="sem-badge"><?= $c['semester'] ?></span></td>
+                        <td><?= number_format((float)$c['credit'], 2) ?></td>
                         <td>
-                            <?php if ($c['avg_rating']): ?>
-                                <span class="stars">★</span> <?= e($c['avg_rating']) ?>
-                            <?php else: ?>
-                                <span style="color:var(--muted);font-size:0.78rem;">—</span>
-                            <?php endif; ?>
+                            <span class="review-cnt <?= $c['review_count'] > 0 ? 'has' : '' ?>">
+                                <?= $c['review_count'] ?> review<?= $c['review_count'] == 1 ? '' : 's' ?>
+                            </span>
                         </td>
                         <td>
-                            <div class="actions">
-                                <a href="admin_courses.php?edit=<?= (int)$c['id'] ?>" class="btn btn-edit btn-sm">✏️ Edit</a>
-                                <form method="POST" action="admin_courses.php" style="display:contents;"
-                                      onsubmit="return confirm('Delete \'<?= e(addslashes($c['code'])) ?>\'? All related reviews and offerings will be removed.')">
-                                    <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                            <div class="action-btns">
+                                <a href="?edit=<?= (int)$c['id'] ?>" class="btn-edit">✏️ Edit</a>
+                                <form method="POST" onsubmit="return confirm('Delete <?= e(addslashes($c['code'])) ?>? This cannot be undone.');">
+                                    <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
                                     <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="id" value="<?= (int)$c['id'] ?>">
-                                    <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                                    <input type="hidden" name="course_id" value="<?= (int)$c['id'] ?>">
+                                    <button type="submit" class="btn-del" <?= $c['review_count'] > 0 ? 'disabled title="Has reviews — cannot delete"' : '' ?>>🗑️</button>
                                 </form>
                             </div>
                         </td>
@@ -406,26 +339,15 @@ $totalPages = (int)ceil($totalCourses / $perPage);
                 <?php endif; ?>
             </tbody>
         </table>
-        </div>
-
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
-            <div class="pagination">
-                <?php
-                    $qParam = $search   ? '&q='    . urlencode($search) : '';
-                    $dParam = $deptFilter ? '&dept=' . $deptFilter       : '';
-                    $prev = max(1, $page - 1);
-                    $next = min($totalPages, $page + 1);
-                ?>
-                <a href="?page=<?= $prev ?><?= $qParam ?><?= $dParam ?>" class="page-link <?= $page === 1 ? 'disabled' : '' ?>">‹</a>
-                <?php for ($p = 1; $p <= $totalPages; $p++): ?>
-                    <a href="?page=<?= $p ?><?= $qParam ?><?= $dParam ?>" class="page-link <?= $p === $page ? 'active' : '' ?>"><?= $p ?></a>
-                <?php endfor; ?>
-                <a href="?page=<?= $next ?><?= $qParam ?><?= $dParam ?>" class="page-link <?= $page === $totalPages ? 'disabled' : '' ?>">›</a>
-            </div>
-        <?php endif; ?>
     </div>
-
 </div>
+
+<nav class="bottombar">
+    <a href="admin.php"          class="nav-item"><span class="icon">🏠</span><span>Dashboard</span></a>
+    <a href="admin_reviews.php"  class="nav-item"><span class="icon">📝</span><span>Reviews</span></a>
+    <a href="admin_courses.php"  class="nav-item active"><span class="icon">📚</span><span>Courses</span></a>
+    <a href="admin_teachers.php" class="nav-item"><span class="icon">👨‍🏫</span><span>Teachers</span></a>
+    <a href="admin_students.php" class="nav-item"><span class="icon">🎓</span><span>Students</span></a>
+</nav>
 </body>
 </html>

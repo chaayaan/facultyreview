@@ -125,3 +125,30 @@ function redirect(string $url): void {
     header('Location: ' . $url);
     exit;
 }
+
+/**
+ * Return a human-friendly semester label.
+ * Example: semesterLabel(1) → "1st Semester"
+ */
+function semesterLabel(int $sem): string {
+    $suffixes = ['','st','nd','rd','th','th','th','th','th'];
+    $s = max(1, min(8, $sem));
+    return $s . ($suffixes[$s] ?? 'th') . ' Semester';
+}
+
+/**
+ * Designation badge color for teacher cards.
+ * Returns a CSS hex color string.
+ */
+function designationColor(string $designation): string {
+    switch ($designation) {
+        case 'Professor':
+            return '#7C3AED';
+        case 'Associate Professor':
+            return '#2563EB';
+        case 'Assistant Professor':
+            return '#0891B2';
+        default:
+            return '#64748B';   // Lecturer
+    }
+}

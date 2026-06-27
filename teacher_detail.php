@@ -1,44 +1,27 @@
 <?php
 // ============================================================
-//  FacultyReview — course_detail.php
-//  Single course: info + aggregate ratings + approved review feed.
-//  Reviews sorted by helpful votes DESC. Vote/Flag via AJAX (vote.php / flag.php).
+//  FacultyReview — teacher_detail.php
+//  Teacher profile + aggregate ratings + approved review feed.
+//  Mirrors course_detail.php. Reviews sorted by helpful votes DESC.
 // ============================================================
 require_once 'db.php';
 requireLogin();
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
-$userId  = (int)$_SESSION['user_id'];
-$userSem = (int)($_SESSION['user_semester'] ?? 1);
+$userId = (int)$_SESSION['user_id'];
 
-$courseId = (int)($_GET['id'] ?? 0);
-if (!$courseId) redirect('courses.php');
+$teacherId = (int)($_GET['id'] ?? 0);
+if (!$teacherId) redirect('search.php');
 
-// ── Course info ──
-$stmt = $mysqli->prepare("SELECT id, code, name, semester, credit FROM courses WHERE id = ?");
-$stmt->bind_param('i', $courseId);
+// ── Teacher profile ──
+$stmt = $mysqli->prepare("SELECT id, name, designation, email, bio FROM teachers WHERE id = ?");
+$stmt->bind_param('i', $teacherId);
 $stmt->execute();
-$course = $stmt->get_result()->fetch_assoc();
+$teacher = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-if (!$course) redirect('courses.php');
-
-// ── Session filter (0 = all) ──
-$sessionFilter = (int)($_GET['session'] ?? 0);
-
-// ── Distinct sessions that have at least one approved review for this course ──
-$stmt = $mysqli->prepare("
-    SELECT DISTINCT s.id, s.label
-    FROM reviews r
-    JOIN sessions s ON s.id = r.session_id
-    WHERE r.course_id = ? AND r.is_approved = 1
-    ORDER BY s.id DESC
-");
-$stmt->bind_param('i', $courseId);
-$stmt->execute();
-$availableSessions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$stmt->close();
+if (!$teacher) redirect('search.php');
 
 // ── Aggregate ratings (approved only) ──
 $stmt = $mysqli->prepare("
@@ -49,45 +32,43 @@ $stmt = $mysqli->prepare("
         AVG(rating_workload) AS avg_workload,
         AVG(rating_grading)  AS avg_grading
     FROM reviews
-    WHERE course_id = ? AND is_approved = 1
+    WHERE teacher_id = ? AND is_approved = 1
 ");
-$stmt->bind_param('i', $courseId);
+$stmt->bind_param('i', $teacherId);
 $stmt->execute();
 $agg = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 $reviewCount = (int)$agg['cnt'];
 
-// ── Review feed (approved only, optional session filter, sorted by helpful votes DESC) ──
-$sql = "
+// ── Review feed (approved only, sorted by helpful votes DESC) ──
+$stmt = $mysqli->prepare("
     SELECT
         r.id, r.comment, r.rating_overall, r.rating_teaching, r.rating_workload,
         r.rating_grading, r.created_at, r.user_id,
-        t.name AS teacher_name,
+        c.code AS course_code, c.name AS course_name,
         s.label AS session_label,
         (SELECT COUNT(*) FROM review_votes v WHERE v.review_id = r.id AND v.vote = 'helpful')     AS helpful_count,
         (SELECT COUNT(*) FROM review_votes v WHERE v.review_id = r.id AND v.vote = 'not_helpful') AS not_helpful_count,
         (SELECT vote FROM review_votes v WHERE v.review_id = r.id AND v.user_id = ?)               AS my_vote
     FROM reviews r
-    JOIN teachers t ON t.id = r.teacher_id
+    JOIN courses c ON c.id = r.course_id
     JOIN sessions s ON s.id = r.session_id
-    WHERE r.course_id = ? AND r.is_approved = 1
-";
-if ($sessionFilter > 0) {
-    $sql .= " AND r.session_id = ? ";
-    $sql .= " ORDER BY helpful_count DESC, r.created_at DESC";
-    $stmt = $mysqli->prepare($sql);
-    $stmt->bind_param('iii', $userId, $courseId, $sessionFilter);
-} else {
-    $sql .= " ORDER BY helpful_count DESC, r.created_at DESC";
-    $stmt = $mysqli->prepare($sql);
-    $stmt->bind_param('ii', $userId, $courseId);
-}
+    WHERE r.teacher_id = ? AND r.is_approved = 1
+    ORDER BY helpful_count DESC, r.created_at DESC
+");
+$stmt->bind_param('ii', $userId, $teacherId);
 $stmt->execute();
 $reviews = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-$canWriteReview = ((int)$course['semester'] === $userSem);
+$initials = '';
+foreach (explode(' ', $teacher['name']) as $part) {
+    $part = preg_replace('/[^A-Za-z]/', '', $part);
+    if ($part !== '') $initials .= strtoupper($part[0]);
+    if (strlen($initials) >= 2) break;
+}
+$designColor = designationColor($teacher['designation']);
 $csrf = csrfToken();
 ?>
 <!DOCTYPE html>
@@ -95,7 +76,7 @@ $csrf = csrfToken();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= e($course['code']) ?> — FacultyReview</title>
+    <title><?= e($teacher['name']) ?> — FacultyReview</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -130,14 +111,18 @@ $csrf = csrfToken();
 
         .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
 
-        /* Course info card */
-        .info-card {
-            background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
-            border-radius: var(--radius); padding: 20px 18px; color: #fff; margin-bottom: 14px;
+        /* Profile card */
+        .profile-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 18px; margin-bottom: 14px; display:flex; gap:14px; align-items:flex-start; }
+        .t-avatar {
+            width: 64px; height: 64px; border-radius: 50%; flex-shrink:0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: 800; color: #fff;
         }
-        .info-meta { font-size: 0.78rem; opacity: .85; font-weight: 600; margin-bottom: 4px; }
-        .info-name { font-size: 1.25rem; font-weight: 800; margin-bottom: 6px; line-height:1.3; }
-        .info-dept { font-size: 0.78rem; opacity: .8; }
+        .t-info { flex: 1; min-width: 0; }
+        .t-name { font-size: 1.1rem; font-weight: 800; margin-bottom: 2px; }
+        .t-designation { display:inline-block; font-size: 0.74rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin-bottom: 6px; }
+        .t-dept { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+        .t-bio { font-size: 0.83rem; color: var(--text); line-height: 1.5; }
 
         /* Aggregate ratings */
         .agg-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
@@ -151,33 +136,12 @@ $csrf = csrfToken();
         .agg-footer { font-size: 0.74rem; color: var(--muted); text-align: center; margin-top: 8px; }
         .no-data { text-align: center; padding: 14px 0; color: var(--muted); font-size: 0.85rem; }
 
-        /* Write review CTA */
-        .cta-row { margin-bottom: 14px; }
-        .write-cta {
-            display: flex; align-items: center; justify-content: center; gap: 6px;
-            background: var(--brand); color: #fff; text-decoration: none;
-            border-radius: 12px; padding: 12px; font-size: 0.9rem; font-weight: 700;
-            box-shadow: var(--shadow); transition: background .15s;
-        }
-        .write-cta:hover { background: var(--brand-dark); }
-        .cta-note { font-size: 0.74rem; color: var(--muted); text-align:center; margin-top:6px; background:var(--card); border-radius:10px; padding:10px; box-shadow:var(--shadow); }
-
-        /* Session chips */
-        .chip-scroll { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px; scrollbar-width: none; }
-        .chip-scroll::-webkit-scrollbar { display: none; }
-        .chip {
-            flex-shrink: 0; padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700;
-            background: var(--card); color: var(--muted); border: 1.5px solid var(--border);
-            text-decoration: none; white-space: nowrap;
-        }
-        .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-
         .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
 
         /* Review card */
         .review-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 10px; }
         .rcard-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-        .rcard-teacher { font-size: 0.95rem; font-weight: 700; }
+        .rcard-course { font-size: 0.92rem; font-weight: 700; }
         .rcard-stars { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; white-space:nowrap; }
         .rcard-num { font-size: 0.78rem; font-weight: 700; color: var(--text); margin-left: 4px; }
         .rcard-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; margin-bottom: 10px; }
@@ -198,7 +162,6 @@ $csrf = csrfToken();
         }
         .vote-btn.active.helpful     { background: #F0FDF4; border-color: var(--success); color: #166534; }
         .vote-btn.active.not_helpful { background: var(--danger-soft); border-color: var(--danger); color: #991B1B; }
-        .vote-btn:disabled { cursor: not-allowed; opacity: .5; }
         .flag-btn {
             background: none; border: none; cursor: pointer; font-size: 0.95rem; color: var(--muted);
             padding: 5px; border-radius: 8px; transition: background .15s;
@@ -227,40 +190,37 @@ $csrf = csrfToken();
 <body>
 
 <header class="topbar">
-    <a href="courses.php" class="back-btn">←</a>
-    <div class="topbar-title"><?= e($course['code']) ?> — <?= e($course['name']) ?></div>
+    <a href="search.php" class="back-btn">←</a>
+    <div class="topbar-title"><?= e($teacher['name']) ?></div>
 </header>
 
 <div class="container">
 
-    <!-- Course info -->
-    <div class="info-card">
-        <div class="info-meta"><?= e($course['code']) ?> · <?= semesterLabel((int)$course['semester']) ?> · <?= number_format((float)$course['credit'], 2) ?> Credits</div>
-        <div class="info-name"><?= e($course['name']) ?></div>
-        <div class="info-dept">Department of Computer Science &amp; Engineering</div>
-    </div>
-
-    <!-- Write review CTA -->
-    <div class="cta-row">
-        <?php if ($canWriteReview): ?>
-            <a href="submit_review.php?course_id=<?= (int)$course['id'] ?>" class="write-cta">✏️ Write a Review for this Course</a>
-        <?php else: ?>
-            <div class="cta-note">You can only review courses from your current semester (<?= semesterLabel($userSem) ?>).</div>
-        <?php endif; ?>
+    <!-- Profile -->
+    <div class="profile-card">
+        <div class="t-avatar" style="background: <?= e($designColor) ?>;"><?= e($initials ?: '?') ?></div>
+        <div class="t-info">
+            <div class="t-name"><?= e($teacher['name']) ?></div>
+            <span class="t-designation" style="background: <?= e($designColor) ?>1A; color: <?= e($designColor) ?>;"><?= e($teacher['designation']) ?></span>
+            <div class="t-dept">Dept. of Computer Science &amp; Engineering</div>
+            <?php if (!empty(trim((string)$teacher['bio']))): ?>
+                <div class="t-bio"><?= e($teacher['bio']) ?></div>
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- Aggregate ratings -->
     <div class="agg-card">
         <div class="agg-title">Aggregate Ratings</div>
         <?php if ($reviewCount === 0): ?>
-            <div class="no-data">No approved reviews yet for this course.</div>
+            <div class="no-data">No approved reviews yet for this teacher.</div>
         <?php else: ?>
             <div class="agg-row">
-                <span class="agg-label">Overall</span>
+                <span class="agg-label">Overall Rating</span>
                 <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_overall']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_overall'], 1) ?></span></span>
             </div>
             <div class="agg-row">
-                <span class="agg-label">Teaching</span>
+                <span class="agg-label">Teaching Quality</span>
                 <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_teaching']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_teaching'], 1) ?></span></span>
             </div>
             <div class="agg-row">
@@ -268,30 +228,19 @@ $csrf = csrfToken();
                 <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_workload']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_workload'], 1) ?></span></span>
             </div>
             <div class="agg-row">
-                <span class="agg-label">Grading Fair</span>
+                <span class="agg-label">Grading Fairness</span>
                 <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_grading']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_grading'], 1) ?></span></span>
             </div>
             <div class="agg-footer">Based on <?= $reviewCount ?> approved review<?= $reviewCount == 1 ? '' : 's' ?></div>
         <?php endif; ?>
     </div>
 
-    <!-- Session filter -->
-    <?php if (!empty($availableSessions)): ?>
-    <div class="chip-scroll">
-        <a href="course_detail.php?id=<?= (int)$course['id'] ?>" class="chip <?= $sessionFilter === 0 ? 'active' : '' ?>">All Sessions</a>
-        <?php foreach ($availableSessions as $s): ?>
-            <a href="course_detail.php?id=<?= (int)$course['id'] ?>&session=<?= (int)$s['id'] ?>"
-               class="chip <?= $sessionFilter === (int)$s['id'] ? 'active' : '' ?>"><?= e($s['label']) ?></a>
-        <?php endforeach; ?>
-    </div>
-    <?php endif; ?>
-
     <div class="section-title">Reviews</div>
 
     <?php if (empty($reviews)): ?>
         <div class="empty-state">
             <div class="empty-emoji">💬</div>
-            <div class="empty-text">No reviews yet for this filter.</div>
+            <div class="empty-text">No reviews yet for this teacher.</div>
         </div>
     <?php else: ?>
         <?php foreach ($reviews as $r):
@@ -300,7 +249,7 @@ $csrf = csrfToken();
         ?>
         <div class="review-card" data-review-id="<?= (int)$r['id'] ?>">
             <div class="rcard-top">
-                <div class="rcard-teacher">👨‍🏫 <?= e($r['teacher_name']) ?></div>
+                <div class="rcard-course"><?= e($r['course_code']) ?> – <?= e($r['course_name']) ?></div>
                 <div><span class="rcard-stars"><?= starDisplay((float)$r['rating_overall']) ?></span><span class="rcard-num"><?= number_format((float)$r['rating_overall'], 1) ?></span></div>
             </div>
             <div class="rcard-meta">📅 <?= e($r['session_label']) ?></div>
@@ -346,8 +295,8 @@ $csrf = csrfToken();
 
 <nav class="bottombar">
     <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
-    <a href="courses.php"   class="nav-item active"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="search.php"    class="nav-item"><span class="icon">🔍</span><span>Search</span></a>
+    <a href="courses.php"   class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
+    <a href="search.php"    class="nav-item active"><span class="icon">🔍</span><span>Search</span></a>
     <a href="submit_review.php" class="nav-item"><span class="icon">✏️</span><span>Review</span></a>
     <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
 </nav>
