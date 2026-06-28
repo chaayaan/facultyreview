@@ -9,6 +9,7 @@
 // ============================================================
 require_once 'db.php';
 requireLogin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 if ($_SESSION['user_role'] === 'admin') redirect('admin.php'); // admins don't submit reviews
@@ -150,110 +151,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $csrf = csrfToken();
+navbarHeader('Submit a Review', 'review');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Submit a Review — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand:      #4F46E5;
-            --brand-dark: #3730A3;
-            --brand-soft: #EEF2FF;
-            --danger:     #EF4444;
-            --danger-soft:#FEF2F2;
-            --success:    #22C55E;
-            --warning:    #EAB308;
-            --bg:         #F1F5F9;
-            --card:       #FFFFFF;
-            --text:       #1E293B;
-            --muted:      #64748B;
-            --border:     #E2E8F0;
-            --radius:     14px;
-            --shadow:     0 2px 12px rgba(0,0,0,.06);
-        }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg); color: var(--text);
-            min-height: 100vh; padding-bottom: 80px;
-        }
+<style>
+    .sem-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: var(--brand-soft); color: var(--brand-dark);
+        border-radius: 20px; padding: 7px 14px; font-size: 0.8rem; font-weight: 700;
+        margin-bottom: 16px;
+    }
 
-        .topbar {
-            position: sticky; top: 0; z-index: 50;
-            background: var(--card); border-bottom: 1px solid var(--border);
-            padding: 12px 16px; display: flex; align-items: center; gap: 10px;
-        }
-        .back-btn { width:34px; height:34px; border-radius:50%; background:var(--brand-soft); color:var(--brand-dark); display:flex; align-items:center; justify-content:center; text-decoration:none; font-size:1.05rem; flex-shrink:0; }
-        .topbar-title { font-size: 1rem; font-weight: 700; }
+    .alert { border-radius: 10px; padding: 12px 14px; font-size: 0.84rem; margin-bottom: 16px; line-height: 1.5; }
+    .alert-error { background: var(--danger-soft); border-left: 4px solid var(--danger); color: #991B1B; }
+    .alert-error ul { padding-left: 16px; margin-top: 4px; }
 
-        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+    .form-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 16px; }
 
-        .sem-badge {
-            display: inline-flex; align-items: center; gap: 6px;
-            background: var(--brand-soft); color: var(--brand-dark);
-            border-radius: 20px; padding: 7px 14px; font-size: 0.8rem; font-weight: 700;
-            margin-bottom: 16px;
-        }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+    .form-group select, .form-group textarea {
+        width: 100%; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: 10px;
+        font-size: 0.93rem; color: var(--text); background: #FAFAFA; outline: none;
+        transition: border-color .2s, box-shadow .2s; font-family: inherit;
+    }
+    .form-group select:focus, .form-group textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); background: #fff; }
+    .form-group select { cursor: pointer; }
+    .form-group textarea { resize: vertical; min-height: 90px; }
+    .char-count { text-align: right; font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
 
-        .alert { border-radius: 10px; padding: 12px 14px; font-size: 0.84rem; margin-bottom: 16px; line-height: 1.5; }
-        .alert-error { background: var(--danger-soft); border-left: 4px solid var(--danger); color: #991B1B; }
-        .alert-error ul { padding-left: 16px; margin-top: 4px; }
+    /* Star picker */
+    .star-picker-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .star-picker-row:last-of-type { border-bottom: none; }
+    .star-picker-label { font-size: 0.9rem; font-weight: 600; }
+    .star-picker { display: flex; gap: 3px; }
+    .star-picker .star { font-size: 1.6rem; color: var(--border); cursor: pointer; transition: color .1s, transform .1s; user-select: none; }
+    .star-picker .star:hover { transform: scale(1.12); }
+    .star-picker .star.filled { color: var(--warning); }
 
-        .form-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 16px; }
+    .ratings-section-title { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 18px 0 4px; }
 
-        .form-group { margin-bottom: 16px; }
-        label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
-        select, textarea {
-            width: 100%; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: 10px;
-            font-size: 0.93rem; color: var(--text); background: #FAFAFA; outline: none;
-            transition: border-color .2s, box-shadow .2s; font-family: inherit;
-        }
-        select:focus, textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); background: #fff; }
-        select { cursor: pointer; }
-        textarea { resize: vertical; min-height: 90px; }
-        .char-count { text-align: right; font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+    .submit-btn { width: 100%; padding: 13px; background: var(--brand); color: #fff; border: none; border-radius: 10px; font-size: 1rem; font-weight: 700; cursor: pointer; margin-top: 8px; transition: background .2s, transform .1s; }
+    .submit-btn:hover { background: var(--brand-dark); }
+    .submit-btn:active { transform: scale(.98); }
+    .submit-btn:disabled { background: #A5B4FC; cursor: not-allowed; }
 
-        /* Star picker */
-        .star-picker-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-        .star-picker-row:last-of-type { border-bottom: none; }
-        .star-picker-label { font-size: 0.9rem; font-weight: 600; }
-        .star-picker { display: flex; gap: 3px; }
-        .star-picker .star { font-size: 1.6rem; color: var(--border); cursor: pointer; transition: color .1s, transform .1s; user-select: none; }
-        .star-picker .star:hover { transform: scale(1.12); }
-        .star-picker .star.filled { color: var(--warning); }
+    .no-courses { background: var(--card); border-radius: var(--radius); padding: 32px 20px; text-align: center; box-shadow: var(--shadow); }
+</style>
 
-        .ratings-section-title { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 18px 0 4px; }
-
-        .btn { width: 100%; padding: 13px; background: var(--brand); color: #fff; border: none; border-radius: 10px; font-size: 1rem; font-weight: 700; cursor: pointer; margin-top: 8px; transition: background .2s, transform .1s; }
-        .btn:hover { background: var(--brand-dark); }
-        .btn:active { transform: scale(.98); }
-        .btn:disabled { background: #A5B4FC; cursor: not-allowed; }
-
-        .no-courses { background: var(--card); border-radius: var(--radius); padding: 32px 20px; text-align: center; box-shadow: var(--shadow); }
-
-        .bottombar {
-            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-            background: var(--card); border-top: 1px solid var(--border);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
-        }
-        .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; text-decoration:none; color:var(--muted); font-size:0.62rem; font-weight:600; flex:1; padding:4px 0; }
-        .nav-item .icon { font-size:1.2rem; line-height:1; }
-        .nav-item.active { color: var(--brand); }
-    </style>
-</head>
-<body>
-
-<header class="topbar">
-    <a href="dashboard.php" class="back-btn">←</a>
-    <div class="topbar-title">Submit a Review</div>
-</header>
-
-<div class="container">
+<div class="fr-container">
 
     <div class="sem-badge">📚 Submitting for: <?= semesterLabel($userSem) ?></div>
 
@@ -342,21 +287,13 @@ $csrf = csrfToken();
                 <div class="char-count"><span id="charCount">0</span>/1000</div>
             </div>
 
-            <button type="submit" class="btn" id="submitBtn">Submit Review</button>
+            <button type="submit" class="submit-btn" id="submitBtn">Submit Review</button>
         </div>
     </form>
 
     <?php endif; ?>
 
 </div>
-
-<nav class="bottombar">
-    <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
-    <a href="courses.php"   class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="search.php"    class="nav-item"><span class="icon">🔍</span><span>Search</span></a>
-    <a href="submit_review.php" class="nav-item active"><span class="icon">✏️</span><span>Review</span></a>
-    <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
-</nav>
 
 <script>
     // Interactive star pickers
@@ -378,22 +315,27 @@ $csrf = csrfToken();
     const commentEl = document.getElementById('comment');
     const charCountEl = document.getElementById('charCount');
     function updateCharCount() { charCountEl.textContent = commentEl.value.length; }
-    commentEl.addEventListener('input', updateCharCount);
-    updateCharCount();
+    if (commentEl) {
+        commentEl.addEventListener('input', updateCharCount);
+        updateCharCount();
+    }
 
     // Double-submit prevention + required star check
-    document.getElementById('reviewForm').addEventListener('submit', function(e) {
-        const required = ['rating_overall','rating_teaching','rating_workload','rating_grading'];
-        for (const id of required) {
-            if (parseInt(document.getElementById(id).value, 10) < 1) {
-                e.preventDefault();
-                alert('Please give a star rating for every category before submitting.');
-                return;
+    const reviewForm = document.getElementById('reviewForm');
+    if (reviewForm) {
+        reviewForm.addEventListener('submit', function(e) {
+            const required = ['rating_overall','rating_teaching','rating_workload','rating_grading'];
+            for (const id of required) {
+                if (parseInt(document.getElementById(id).value, 10) < 1) {
+                    e.preventDefault();
+                    alert('Please give a star rating for every category before submitting.');
+                    return;
+                }
             }
-        }
-        const btn = document.getElementById('submitBtn');
-        btn.disabled = true; btn.textContent = 'Submitting…';
-    });
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true; btn.textContent = 'Submitting…';
+        });
+    }
 </script>
-</body>
-</html>
+
+<?php navbarFooter('student', 'review'); ?>

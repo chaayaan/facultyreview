@@ -6,6 +6,7 @@
 // ============================================================
 require_once 'db.php';
 requireAdmin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -96,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $chk->close();
 
             if ($cnt > 0) {
-                $_SESSION['flash'] = "⚠️ Cannot delete: this session has $cnt review(s) linked to it.";
+                $_SESSION['flash'] = "warn:Cannot delete: this session has $cnt review(s) linked to it.";
             } else {
                 $stmt = $mysqli->prepare("DELETE FROM sessions WHERE id = ?");
                 $stmt->bind_param('i', $id);
@@ -133,119 +134,43 @@ $sessions = $mysqli->query("
 ")->fetch_all(MYSQLI_ASSOC);
 
 $csrf = csrfToken();
+
+navbarHeader('Manage Sessions', '');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Sessions — FacultyReview Admin</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand: #4F46E5; --brand-dark: #3730A3; --brand-soft: #EEF2FF;
-            --danger: #EF4444; --danger-soft: #FEF2F2;
-            --success: #22C55E; --success-soft: #F0FDF4;
-            --warning: #EAB308; --warning-soft: #FEFCE8;
-            --bg: #F1F5F9; --card: #FFFFFF; --text: #1E293B;
-            --muted: #64748B; --border: #E2E8F0;
-            --radius: 14px; --shadow: 0 2px 12px rgba(0,0,0,.06);
-        }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+<style>
+    /* ── Form card ── */
+    .form-card { background: var(--fr-card); border-radius: var(--fr-radius); box-shadow: var(--fr-shadow); padding: 18px 16px; margin-bottom: 18px; }
+    .form-card-title { font-size: 0.9rem; font-weight: 800; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--fr-border); }
 
-        /* ── Topbar ── */
-        .topbar { background: var(--brand); padding: 0 16px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 16px rgba(79,70,229,.25); }
-        .topbar-left { display: flex; align-items: center; gap: 10px; }
-        .topbar-logo { font-size: 1rem; font-weight: 800; color: #fff; }
-        .topbar-logo span { opacity: .7; font-weight: 400; }
-        .admin-chip { background: rgba(255,255,255,.18); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
-        .logout-btn { background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 0.76rem; font-weight: 700; text-decoration: none; cursor: pointer; }
-        .logout-btn:hover { background: rgba(255,255,255,.28); }
+    /* ── Toggle switch ── */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #F8FAFC; border: 1.5px solid var(--fr-border); border-radius: 10px; margin-bottom: 14px; }
+    .toggle-label { font-size: 0.85rem; font-weight: 700; }
+    .toggle-sub { font-size: 0.72rem; color: var(--fr-muted); margin-top: 2px; }
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: var(--fr-border); border-radius: 24px; transition: background .2s; }
+    .slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+    .switch input:checked + .slider { background: var(--fr-brand); }
+    .switch input:checked + .slider::before { transform: translateX(20px); }
 
-        /* ── Layout ── */
-        .container { max-width: 560px; margin: 0 auto; padding: 16px 14px; }
-        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 4px; }
-        .page-sub { font-size: 0.8rem; color: var(--muted); margin-bottom: 16px; }
+    .errors { background: var(--fr-danger-soft); border-left: 4px solid var(--fr-danger); border-radius: 10px; padding: 10px 13px; margin-bottom: 12px; font-size: 0.82rem; color: #991B1B; }
+    .errors ul { padding-left: 16px; margin-top: 3px; }
 
-        /* ── Flash ── */
-        .flash { border-radius: 10px; padding: 11px 14px; font-size: 0.84rem; margin-bottom: 14px; font-weight: 600; border-left: 4px solid; }
-        .flash-success { background: var(--success-soft); border-color: var(--success); color: #166534; }
-        .flash-warning { background: var(--warning-soft); border-color: var(--warning); color: #92400E; }
+    /* ── Sessions list ── */
+    .sessions-list { display: flex; flex-direction: column; gap: 10px; }
+    .session-row { background: var(--fr-card); border-radius: var(--fr-radius); box-shadow: var(--fr-shadow); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .session-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .session-info { flex: 1; min-width: 0; }
+    .session-label { font-size: 0.95rem; font-weight: 800; }
+    .session-meta { font-size: 0.72rem; color: var(--fr-muted); margin-top: 3px; }
+    .session-actions { display: flex; gap: 6px; flex-shrink: 0; }
+</style>
 
-        /* ── Form card ── */
-        .form-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 16px; margin-bottom: 18px; }
-        .form-card-title { font-size: 0.9rem; font-weight: 800; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+<div class="fr-container">
+    <div class="fr-page-title">📅 Academic Sessions</div>
+    <div class="fr-page-sub">Manage semesters shown in the review form. Only one session can be active at a time.</div>
 
-        .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-        label { font-size: 0.74rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-        input[type=text] { padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 0.92rem; color: var(--text); background: #FAFAFA; outline: none; font-family: inherit; transition: border-color .2s, box-shadow .2s; width: 100%; }
-        input[type=text]:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); background: #fff; }
-
-        /* ── Toggle switch ── */
-        .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #F8FAFC; border: 1.5px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
-        .toggle-label { font-size: 0.85rem; font-weight: 700; }
-        .toggle-sub { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
-        .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 24px; transition: background .2s; }
-        .slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
-        .switch input:checked + .slider { background: var(--brand); }
-        .switch input:checked + .slider::before { transform: translateX(20px); }
-
-        .errors { background: var(--danger-soft); border-left: 4px solid var(--danger); border-radius: 10px; padding: 10px 13px; margin-bottom: 12px; font-size: 0.82rem; color: #991B1B; }
-        .errors ul { padding-left: 16px; margin-top: 3px; }
-
-        .form-actions { display: flex; gap: 8px; }
-        .btn { padding: 10px 18px; border-radius: 9px; font-size: 0.85rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
-        .btn-primary { background: var(--brand); color: #fff; }
-        .btn-primary:hover { background: var(--brand-dark); }
-        .btn-ghost { background: var(--bg); color: var(--muted); }
-        .btn-ghost:hover { background: var(--border); }
-
-        /* ── Sessions list ── */
-        .sessions-list { display: flex; flex-direction: column; gap: 10px; }
-        .session-row { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
-        .session-icon { font-size: 1.4rem; flex-shrink: 0; }
-        .session-info { flex: 1; min-width: 0; }
-        .session-label { font-size: 0.95rem; font-weight: 800; }
-        .session-meta { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
-        .active-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--success-soft); color: #166534; font-size: 0.68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; margin-left: 6px; }
-        .inactive-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--bg); color: var(--muted); font-size: 0.68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; margin-left: 6px; }
-        .session-actions { display: flex; gap: 6px; flex-shrink: 0; }
-        .btn-edit-sm { padding: 6px 11px; background: var(--brand-soft); color: var(--brand-dark); border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; text-decoration: none; font-family: inherit; }
-        .btn-edit-sm:hover { background: #C7D2FE; }
-        .btn-del-sm { padding: 6px 11px; background: var(--danger-soft); color: var(--danger); border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; font-family: inherit; }
-        .btn-del-sm:hover { background: #FEE2E2; }
-        .btn-del-sm:disabled { opacity: .4; cursor: not-allowed; }
-
-        .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
-        .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
-        .empty-text { font-size: 0.85rem; color: var(--muted); }
-
-        /* ── Bottom nav ── */
-        .bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); box-shadow: 0 -2px 12px rgba(0,0,0,.05); }
-        .nav-item { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 0.6rem; font-weight: 600; flex: 1; padding: 4px 0; }
-        .nav-item .icon { font-size: 1.15rem; line-height: 1; }
-        .nav-item.active { color: var(--brand); }
-    </style>
-</head>
-<body>
-
-<header class="topbar">
-    <div class="topbar-left">
-        <div class="topbar-logo">Faculty<span>Review</span></div>
-        <span class="admin-chip">Admin</span>
-    </div>
-    <a href="logout.php" class="logout-btn">Logout</a>
-</header>
-
-<div class="container">
-    <div class="page-title">📅 Academic Sessions</div>
-    <div class="page-sub">Manage semesters shown in the review form. Only one session can be active at a time.</div>
-
-    <?php if ($flash): ?>
-        <div class="flash <?= str_contains($flash, '⚠️') ? 'flash-warning' : 'flash-success' ?>"><?= e($flash) ?></div>
-    <?php endif; ?>
+    <?php renderFlash($flash); ?>
 
     <!-- Add / Edit form -->
     <div class="form-card">
@@ -262,9 +187,9 @@ $csrf = csrfToken();
                 <input type="hidden" name="session_id" value="<?= (int)$editSession['id'] ?>">
             <?php endif; ?>
 
-            <div class="form-group">
-                <label for="label">Session Label</label>
-                <input type="text" id="label" name="label" maxlength="30"
+            <div class="fr-form-group">
+                <label class="fr-label" for="label">Session Label</label>
+                <input type="text" class="fr-input" id="label" name="label" maxlength="30"
                        placeholder="e.g. Fall 2025, Spring 2026"
                        value="<?= e($editSession['label'] ?? '') ?>" required>
             </div>
@@ -280,12 +205,12 @@ $csrf = csrfToken();
                 </label>
             </div>
 
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">
+            <div style="display:flex;gap:8px;">
+                <button type="submit" class="fr-btn fr-btn-primary">
                     <?= $editSession ? '💾 Save Changes' : '➕ Add Session' ?>
                 </button>
                 <?php if ($editSession): ?>
-                    <a href="admin_sessions.php" class="btn btn-ghost">Cancel</a>
+                    <a href="admin_sessions.php" class="fr-btn fr-btn-ghost">Cancel</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -293,9 +218,10 @@ $csrf = csrfToken();
 
     <!-- Sessions list -->
     <?php if (empty($sessions)): ?>
-        <div class="empty-state">
-            <div class="empty-emoji">📭</div>
-            <div class="empty-text">No sessions yet. Add your first one above.</div>
+        <div class="fr-empty">
+            <div class="fr-empty-icon">📭</div>
+            <div class="fr-empty-title">No sessions yet</div>
+            <div class="fr-empty-sub">Add your first one above.</div>
         </div>
     <?php else: ?>
         <div class="sessions-list">
@@ -306,9 +232,9 @@ $csrf = csrfToken();
                     <div class="session-label">
                         <?= e($s['label']) ?>
                         <?php if ($s['is_active']): ?>
-                            <span class="active-badge">✅ Active</span>
+                            <span class="fr-badge-success">✅ Active</span>
                         <?php else: ?>
-                            <span class="inactive-badge">Inactive</span>
+                            <span class="fr-badge-muted">Inactive</span>
                         <?php endif; ?>
                     </div>
                     <div class="session-meta">
@@ -316,12 +242,12 @@ $csrf = csrfToken();
                     </div>
                 </div>
                 <div class="session-actions">
-                    <a href="?edit=<?= (int)$s['id'] ?>" class="btn-edit-sm">✏️ Edit</a>
+                    <a href="?edit=<?= (int)$s['id'] ?>" class="fr-btn fr-btn-ghost fr-btn-sm">✏️ Edit</a>
                     <form method="POST" onsubmit="return confirm('Delete session \'<?= e(addslashes($s['label'])) ?>\'?');" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="session_id" value="<?= (int)$s['id'] ?>">
-                        <button type="submit" class="btn-del-sm"
+                        <button type="submit" class="fr-btn fr-btn-danger fr-btn-sm"
                             <?= $s['review_count'] > 0 ? 'disabled title="Has reviews — cannot delete"' : '' ?>>
                             🗑️
                         </button>
@@ -333,12 +259,4 @@ $csrf = csrfToken();
     <?php endif; ?>
 </div>
 
-<nav class="bottombar">
-    <a href="admin.php"          class="nav-item"><span class="icon">🏠</span><span>Dashboard</span></a>
-    <a href="admin_reviews.php"  class="nav-item"><span class="icon">📝</span><span>Reviews</span></a>
-    <a href="admin_courses.php"  class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="admin_teachers.php" class="nav-item"><span class="icon">👨‍🏫</span><span>Teachers</span></a>
-    <a href="admin_students.php" class="nav-item"><span class="icon">🎓</span><span>Students</span></a>
-</nav>
-</body>
-</html>
+<?php navbarFooter('admin', ''); ?>

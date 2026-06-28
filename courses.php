@@ -5,6 +5,7 @@
 // ============================================================
 require_once 'db.php';
 requireLogin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -52,139 +53,75 @@ if ($activeSem === 0) {
 }
 $courses = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
+
+navbarHeader('Courses', 'courses');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Courses — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand:      #4F46E5;
-            --brand-dark: #3730A3;
-            --brand-soft: #EEF2FF;
-            --warning:    #EAB308;
-            --success:    #22C55E;
-            --bg:         #F1F5F9;
-            --card:       #FFFFFF;
-            --text:       #1E293B;
-            --muted:      #64748B;
-            --border:     #E2E8F0;
-            --radius:     14px;
-            --shadow:     0 2px 12px rgba(0,0,0,.06);
-        }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg); color: var(--text);
-            min-height: 100vh; padding-bottom: 80px;
-        }
+<style>
+    /* Page head */
+    .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 2px; }
+    .page-sub   { font-size: 0.82rem; color: var(--muted); margin-bottom: 14px; }
 
-        /* Topbar */
-        .topbar {
-            position: sticky; top: 0; z-index: 50;
-            background: var(--card); border-bottom: 1px solid var(--border);
-            padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
-        }
-        .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-        .topbar-icon  { width:32px; height:32px; background:var(--brand); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; }
-        .topbar-name  { font-size:1.05rem; font-weight:700; color:var(--text); }
-        .topbar-name span { color: var(--brand); }
-        .avatar { width:34px; height:34px; border-radius:50%; background:var(--brand-soft); color:var(--brand-dark); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; text-decoration:none; }
+    /* Semester chips */
+    .chip-scroll {
+        display: flex; gap: 7px; overflow-x: auto;
+        padding-bottom: 4px; margin-bottom: 16px;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .chip-scroll::-webkit-scrollbar { display: none; }
+    .chip {
+        flex-shrink: 0; padding: 7px 14px; border-radius: 20px;
+        font-size: 0.78rem; font-weight: 700;
+        background: var(--card); color: var(--muted);
+        border: 1.5px solid var(--border); text-decoration: none;
+        white-space: nowrap; transition: all .15s;
+    }
+    .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .chip.mine   { border-color: var(--brand); color: var(--brand); }
+    .chip.mine.active { background: var(--brand); color: #fff; }
 
-        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+    /* Course card */
+    .course-card {
+        background: var(--card); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 14px 16px;
+        margin-bottom: 10px; text-decoration: none; color: var(--text);
+        display: block; transition: box-shadow .15s, transform .1s;
+        border-left: 4px solid transparent;
+    }
+    .course-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
 
-        /* Page head */
-        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 2px; }
-        .page-sub   { font-size: 0.82rem; color: var(--muted); margin-bottom: 14px; }
+    .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .course-left { flex: 1; min-width: 0; }
+    .course-code { font-size: 0.68rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+    .course-name { font-size: 0.97rem; font-weight: 700; }
+    .course-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
 
-        /* Semester chips */
-        .chip-scroll {
-            display: flex; gap: 7px; overflow-x: auto;
-            padding-bottom: 4px; margin-bottom: 16px;
-            -webkit-overflow-scrolling: touch; scrollbar-width: none;
-        }
-        .chip-scroll::-webkit-scrollbar { display: none; }
-        .chip {
-            flex-shrink: 0; padding: 7px 14px; border-radius: 20px;
-            font-size: 0.78rem; font-weight: 700;
-            background: var(--card); color: var(--muted);
-            border: 1.5px solid var(--border); text-decoration: none;
-            white-space: nowrap; transition: all .15s;
-        }
-        .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-        .chip.mine   { border-color: var(--brand); color: var(--brand); }
-        .chip.mine.active { background: var(--brand); color: #fff; }
+    .course-right { text-align: right; flex-shrink: 0; }
+    .stars        { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; display: block; }
+    .avg-num      { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+    .review-count { font-size: 0.68rem; color: var(--muted); }
+    .no-reviews   { font-size: 0.72rem; color: var(--muted); }
 
-        /* Course card */
-        .course-card {
-            background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 14px 16px;
-            margin-bottom: 10px; text-decoration: none; color: var(--text);
-            display: block; transition: box-shadow .15s, transform .1s;
-            border-left: 4px solid transparent;
-        }
-        .course-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
+    /* Mini ratings bar */
+    .mini-ratings {
+        display: flex; gap: 10px; margin-top: 10px;
+        padding-top: 10px; border-top: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+    .mini-r { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; }
+    .mini-r-label { color: var(--muted); font-weight: 600; }
+    .mini-r-stars { color: var(--warning); font-size: 0.7rem; }
 
-        .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-        .course-left { flex: 1; min-width: 0; }
-        .course-code { font-size: 0.68rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
-        .course-name { font-size: 0.97rem; font-weight: 700; }
-        .course-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
+    /* Semester group header (for "All" view) */
+    .sem-group { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 8px; }
+    .sem-group:first-child { margin-top: 0; }
 
-        .course-right { text-align: right; flex-shrink: 0; }
-        .stars        { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; display: block; }
-        .avg-num      { font-size: 0.75rem; font-weight: 700; color: var(--text); }
-        .review-count { font-size: 0.68rem; color: var(--muted); }
-        .no-reviews   { font-size: 0.72rem; color: var(--muted); }
+    /* Empty */
+    .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
+    .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
+    .empty-text  { font-size: 0.85rem; color: var(--muted); }
+</style>
 
-        /* Mini ratings bar */
-        .mini-ratings {
-            display: flex; gap: 10px; margin-top: 10px;
-            padding-top: 10px; border-top: 1px solid var(--border);
-            flex-wrap: wrap;
-        }
-        .mini-r { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; }
-        .mini-r-label { color: var(--muted); font-weight: 600; }
-        .mini-r-stars { color: var(--warning); font-size: 0.7rem; }
-
-        /* Semester group header (for "All" view) */
-        .sem-group { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 8px; }
-        .sem-group:first-child { margin-top: 0; }
-
-        /* Empty */
-        .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
-        .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
-        .empty-text  { font-size: 0.85rem; color: var(--muted); }
-
-        /* Bottom nav */
-        .bottombar {
-            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-            background: var(--card); border-top: 1px solid var(--border);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
-        }
-        .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; text-decoration:none; color:var(--muted); font-size:0.62rem; font-weight:600; flex:1; padding:4px 0; transition:color .15s; }
-        .nav-item .icon { font-size:1.2rem; line-height:1; }
-        .nav-item.active { color: var(--brand); }
-    </style>
-</head>
-<body>
-
-<header class="topbar">
-    <a href="dashboard.php" class="topbar-brand">
-        <div class="topbar-icon">🎓</div>
-        <span class="topbar-name">Faculty<span>Review</span></span>
-    </a>
-    <div style="display:flex;gap:8px;align-items:center">
-        <a href="search.php" class="avatar" style="background:transparent;font-size:1.2rem;color:var(--muted)">🔍</a>
-        <a href="dashboard.php" class="avatar"><?= e(strtoupper(substr($userName, 0, 1))) ?></a>
-    </div>
-</header>
-
-<div class="container">
+<div class="fr-container">
 
     <div class="page-title">Courses</div>
     <div class="page-sub">
@@ -237,13 +174,7 @@ $stmt->close();
 
 </div>
 
-<nav class="bottombar">
-    <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
-    <a href="courses.php"   class="nav-item active"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="search.php"    class="nav-item"><span class="icon">🔍</span><span>Search</span></a>
-    <a href="submit_review.php" class="nav-item"><span class="icon">✏️</span><span>Review</span></a>
-    <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
-</nav>
+<?php navbarFooter('student', 'courses'); ?>
 
 <?php
 // ── Helper: render one course card (kept here to stay self-contained) ──
@@ -279,5 +210,3 @@ function renderCourseCard(array $c): string {
     </a>';
 }
 ?>
-</body>
-</html>

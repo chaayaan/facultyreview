@@ -1,9 +1,9 @@
 <?php
 // ============================================================
 //  FacultyReview — register.php  (CSE Edition)
-//  Self-contained. Own CSS + JS included.
 // ============================================================
 require_once 'db.php';
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (!empty($_SESSION['user_id'])) redirect('dashboard.php');
@@ -63,91 +63,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->close();
     }
 }
+
+navbarPublicHeader('Register — FacultyReview');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand:#4F46E5; --brand-dark:#3730A3; --brand-soft:#EEF2FF;
-            --danger:#EF4444; --bg:#F1F5F9; --card:#FFFFFF;
-            --text:#1E293B; --muted:#64748B; --border:#E2E8F0;
-            --radius:14px; --shadow:0 4px 24px rgba(0,0,0,.08);
-        }
-        body {
-            font-family:'Segoe UI',system-ui,sans-serif;
-            background:var(--bg); color:var(--text);
-            min-height:100vh; display:flex; flex-direction:column;
-            align-items:center; justify-content:center; padding:24px 16px;
-        }
-        .brand { display:flex; align-items:center; gap:10px; margin-bottom:24px; text-decoration:none; }
-        .brand-icon { width:42px; height:42px; background:var(--brand); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px; }
-        .brand-name { font-size:1.3rem; font-weight:700; color:var(--text); }
-        .brand-name span { color:var(--brand); }
 
-        .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 24px; width:100%; max-width:430px; }
-        .card-title { font-size:1.2rem; font-weight:700; margin-bottom:3px; }
-        .card-sub { font-size:0.85rem; color:var(--muted); margin-bottom:22px; }
+<style>
+    body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+    }
 
-        .alert { border-radius:10px; padding:12px 14px; font-size:0.84rem; margin-bottom:16px; line-height:1.5; }
-        .alert-error { background:#FEF2F2; border-left:4px solid var(--danger); color:#991B1B; }
-        .alert-error ul { padding-left:16px; margin-top:4px; }
+    .reg-card {
+        background: var(--card, #fff);
+        border-radius: 14px;
+        box-shadow: 0 4px 24px rgba(0,0,0,.08);
+        padding: 28px 24px;
+        width: 100%;
+        max-width: 430px;
+        margin: 24px auto;
+    }
+    .card-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 3px; }
+    .card-sub   { font-size: 0.85rem; color: var(--muted, #64748B); margin-bottom: 22px; }
 
-        .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-        .form-group { margin-bottom:14px; }
-        label { display:block; font-size:0.78rem; font-weight:600; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em; }
-        input, select {
-            width:100%; padding:11px 13px; border:1.5px solid var(--border); border-radius:10px;
-            font-size:0.93rem; color:var(--text); background:#FAFAFA;
-            transition:border-color .2s,box-shadow .2s; outline:none; -webkit-appearance:none;
-        }
-        input:focus, select:focus { border-color:var(--brand); box-shadow:0 0 0 3px rgba(79,70,229,.12); background:#fff; }
-        select { cursor:pointer; }
+    .alert { border-radius: 10px; padding: 12px 14px; font-size: 0.84rem; margin-bottom: 16px; line-height: 1.5; }
+    .alert-error { background: #FEF2F2; border-left: 4px solid #EF4444; color: #991B1B; }
+    .alert-error ul { padding-left: 16px; margin-top: 4px; }
 
-        .pw-wrap { position:relative; }
-        .pw-wrap input { padding-right:42px; }
-        .pw-toggle { position:absolute; right:11px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:17px; color:var(--muted); padding:4px; line-height:1; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { margin-bottom: 14px; }
+    label {
+        display: block; font-size: 0.78rem; font-weight: 600;
+        color: var(--muted, #64748B); margin-bottom: 5px;
+        text-transform: uppercase; letter-spacing: .04em;
+    }
+    input, select {
+        width: 100%; padding: 11px 13px;
+        border: 1.5px solid var(--border, #E2E8F0);
+        border-radius: 10px; font-size: 0.93rem;
+        color: var(--text, #1E293B); background: #FAFAFA;
+        transition: border-color .2s, box-shadow .2s;
+        outline: none; -webkit-appearance: none;
+    }
+    input:focus, select:focus {
+        border-color: var(--brand, #4F46E5);
+        box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+        background: #fff;
+    }
+    select { cursor: pointer; }
 
-        .strength-wrap { margin-top:7px; display:none; }
-        .strength-bar { height:4px; border-radius:4px; background:var(--border); overflow:hidden; }
-        .strength-fill { height:100%; border-radius:4px; width:0; transition:width .3s,background .3s; }
-        .strength-label { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+    .pw-wrap { position: relative; }
+    .pw-wrap input { padding-right: 42px; }
+    .pw-toggle {
+        position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; cursor: pointer;
+        font-size: 17px; color: var(--muted, #64748B); padding: 4px; line-height: 1;
+    }
 
-        .btn { width:100%; padding:13px; background:var(--brand); color:#fff; border:none; border-radius:10px; font-size:1rem; font-weight:600; cursor:pointer; margin-top:6px; transition:background .2s,transform .1s; }
-        .btn:hover { background:var(--brand-dark); }
-        .btn:active { transform:scale(.98); }
-        .btn:disabled { background:#A5B4FC; cursor:not-allowed; }
+    .strength-wrap { margin-top: 7px; display: none; }
+    .strength-bar  { height: 4px; border-radius: 4px; background: var(--border, #E2E8F0); overflow: hidden; }
+    .strength-fill { height: 100%; border-radius: 4px; width: 0; transition: width .3s, background .3s; }
+    .strength-label { font-size: 0.72rem; color: var(--muted, #64748B); margin-top: 4px; }
 
-        .card-foot { text-align:center; font-size:0.875rem; color:var(--muted); margin-top:18px; }
-        .card-foot a { color:var(--brand); font-weight:600; text-decoration:none; }
-        .card-foot a:hover { text-decoration:underline; }
-        .divider { border:none; border-top:1px solid var(--border); margin:18px 0; }
+    .submit-btn {
+        width: 100%; padding: 13px;
+        background: var(--brand, #4F46E5); color: #fff;
+        border: none; border-radius: 10px;
+        font-size: 1rem; font-weight: 600;
+        cursor: pointer; margin-top: 6px;
+        transition: background .2s, transform .1s;
+    }
+    .submit-btn:hover  { background: var(--brand-dark, #3730A3); }
+    .submit-btn:active { transform: scale(.98); }
+    .submit-btn:disabled { background: #A5B4FC; cursor: not-allowed; }
 
-        .dept-badge {
-            display:inline-flex; align-items:center; gap:6px;
-            background:var(--brand-soft); color:var(--brand);
-            border-radius:20px; padding:5px 12px;
-            font-size:0.78rem; font-weight:700;
-            margin-bottom:18px;
-        }
-    </style>
-</head>
-<body>
+    .card-foot {
+        text-align: center; font-size: 0.875rem;
+        color: var(--muted, #64748B); margin-top: 18px;
+    }
+    .card-foot a { color: var(--brand, #4F46E5); font-weight: 600; text-decoration: none; }
+    .card-foot a:hover { text-decoration: underline; }
 
-<a href="index.php" class="brand">
-    <div class="brand-icon">🎓</div>
-    <span class="brand-name">Faculty<span>Review</span></span>
-</a>
+    .fr-divider { margin: 18px 0; }
 
-<div class="card">
+    .dept-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: var(--brand-soft, #EEF2FF);
+        color: var(--brand, #4F46E5);
+        border-radius: 20px; padding: 5px 12px;
+        font-size: 0.78rem; font-weight: 700;
+        margin-bottom: 18px;
+    }
+</style>
+
+<div class="reg-card">
     <div class="card-title">Create your account</div>
-    <div class="card-sub">CSE students only · Your reviews stay anonymous.</div>
+    <!-- <div class="card-sub">CSE students only · Your reviews stay anonymous.</div> -->
 
-    <div class="dept-badge">🖥️ Dept. of Computer Science &amp; Engineering</div>
+    <div class="dept-badge">🖥️ Dept. of CSE · Your reviews stay anonymous.</div>
 
     <?php if (!empty($errors)): ?>
         <div class="alert alert-error">
@@ -162,14 +177,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <!-- Name -->
         <div class="form-group">
             <label for="name">Full Name</label>
-            <input type="text" id="name" name="name" placeholder="e.g. Rafi Ahmed" value="<?= e($old['name']) ?>" autocomplete="name" required>
+            <input type="text" id="name" name="name" placeholder="e.g. Rafi Ahmed"
+                   value="<?= e($old['name']) ?>" autocomplete="name" required>
         </div>
 
-        <!-- Student ID + Semester side by side -->
+        <!-- Student ID + Semester -->
         <div class="row2">
             <div class="form-group">
                 <label for="student_id">Student ID</label>
-                <input type="text" id="student_id" name="student_id" placeholder="e.g. C213001" value="<?= e($old['student_id']) ?>" required>
+                <input type="text" id="student_id" name="student_id" placeholder="e.g. C213001"
+                       value="<?= e($old['student_id']) ?>" required>
             </div>
             <div class="form-group">
                 <label for="semester">Current Semester</label>
@@ -187,14 +204,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <!-- Email -->
         <div class="form-group">
             <label for="email">University Email</label>
-            <input type="email" id="email" name="email" placeholder="you@university.edu" value="<?= e($old['email']) ?>" autocomplete="email" required>
+            <input type="email" id="email" name="email" placeholder="you@university.edu"
+                   value="<?= e($old['email']) ?>" autocomplete="email" required>
         </div>
 
         <!-- Password -->
         <div class="form-group">
             <label for="password">Password</label>
             <div class="pw-wrap">
-                <input type="password" id="password" name="password" placeholder="At least 6 characters" autocomplete="new-password" required>
+                <input type="password" id="password" name="password"
+                       placeholder="At least 6 characters" autocomplete="new-password" required>
                 <button type="button" class="pw-toggle" id="togglePw">👁️</button>
             </div>
             <div class="strength-wrap" id="strengthWrap">
@@ -207,15 +226,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="form-group">
             <label for="confirm">Confirm Password</label>
             <div class="pw-wrap">
-                <input type="password" id="confirm" name="confirm" placeholder="Repeat your password" autocomplete="new-password" required>
+                <input type="password" id="confirm" name="confirm"
+                       placeholder="Repeat your password" autocomplete="new-password" required>
                 <button type="button" class="pw-toggle" id="toggleConfirm">👁️</button>
             </div>
         </div>
 
-        <button type="submit" class="btn" id="submitBtn">Create Account</button>
+        <button type="submit" class="submit-btn" id="submitBtn">Create Account</button>
     </form>
 
-    <hr class="divider">
+    <hr class="fr-divider">
     <div class="card-foot">Already have an account? <a href="login.php">Sign in</a></div>
 </div>
 
@@ -228,40 +248,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             btn.textContent = s ? '👁️' : '🙈';
         });
     }
-    makeToggle('togglePw','password');
-    makeToggle('toggleConfirm','confirm');
+    makeToggle('togglePw', 'password');
+    makeToggle('toggleConfirm', 'confirm');
 
     const pwInp = document.getElementById('password');
     const swrap = document.getElementById('strengthWrap');
     const sfill = document.getElementById('strengthFill');
     const slbl  = document.getElementById('strengthLabel');
     const levels = [
-        {label:'Too short',  color:'#EF4444', pct:15},
-        {label:'Weak',       color:'#F97316', pct:35},
-        {label:'Fair',       color:'#EAB308', pct:60},
-        {label:'Good',       color:'#22C55E', pct:80},
-        {label:'Strong 💪',  color:'#10B981', pct:100},
+        { label: 'Too short',  color: '#EF4444', pct: 15 },
+        { label: 'Weak',       color: '#F97316', pct: 35 },
+        { label: 'Fair',       color: '#EAB308', pct: 60 },
+        { label: 'Good',       color: '#22C55E', pct: 80 },
+        { label: 'Strong 💪',  color: '#10B981', pct: 100 },
     ];
     function calcStrength(pw) {
         if (pw.length < 6) return 0;
         let s = 1;
         if (pw.length >= 10) s++;
         if (/[A-Z]/.test(pw)) s++;
-        if (/[0-9]/.test(pw)) s++;
+        if (/[0-9]/.test(pw))  s++;
         if (/[^A-Za-z0-9]/.test(pw)) s++;
         return Math.min(s, 4);
     }
     pwInp.addEventListener('input', () => {
-        if (!pwInp.value) { swrap.style.display='none'; return; }
-        swrap.style.display='block';
+        if (!pwInp.value) { swrap.style.display = 'none'; return; }
+        swrap.style.display = 'block';
         const l = levels[calcStrength(pwInp.value)];
-        sfill.style.width = l.pct+'%'; sfill.style.background = l.color;
-        slbl.textContent = l.label; slbl.style.color = l.color;
+        sfill.style.width      = l.pct + '%';
+        sfill.style.background = l.color;
+        slbl.textContent       = l.label;
+        slbl.style.color       = l.color;
     });
 
     const confirmInp = document.getElementById('confirm');
     function checkMatch() {
-        if (!confirmInp.value) { confirmInp.style.borderColor=''; return; }
+        if (!confirmInp.value) { confirmInp.style.borderColor = ''; return; }
         confirmInp.style.borderColor = pwInp.value === confirmInp.value ? '#22C55E' : '#EF4444';
     }
     confirmInp.addEventListener('input', checkMatch);
@@ -269,8 +291,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     document.getElementById('regForm').addEventListener('submit', () => {
         const btn = document.getElementById('submitBtn');
-        btn.disabled = true; btn.textContent = 'Creating account…';
+        btn.disabled = true;
+        btn.textContent = 'Creating account…';
     });
 </script>
-</body>
-</html>
+
+<?php navbarFooter('public'); ?>

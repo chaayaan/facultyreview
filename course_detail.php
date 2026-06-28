@@ -6,6 +6,7 @@
 // ============================================================
 require_once 'db.php';
 requireLogin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -58,12 +59,12 @@ $stmt->close();
 
 $reviewCount = (int)$agg['cnt'];
 
-// ── Review feed (approved only, optional session filter, sorted by helpful votes DESC) ──
+// ── Review feed ──
 $sql = "
     SELECT
         r.id, r.comment, r.rating_overall, r.rating_teaching, r.rating_workload,
-        r.rating_grading, r.created_at, r.user_id,
-        t.name AS teacher_name,
+        r.rating_grading, r.created_at, r.user_id, r.semester_taken,
+        t.id AS teacher_id, t.name AS teacher_name,
         s.label AS session_label,
         (SELECT COUNT(*) FROM review_votes v WHERE v.review_id = r.id AND v.vote = 'helpful')     AS helpful_count,
         (SELECT COUNT(*) FROM review_votes v WHERE v.review_id = r.id AND v.vote = 'not_helpful') AS not_helpful_count,
@@ -74,7 +75,7 @@ $sql = "
     WHERE r.course_id = ? AND r.is_approved = 1
 ";
 if ($sessionFilter > 0) {
-    $sql .= " AND r.session_id = ? ";
+    $sql .= " AND r.session_id = ?";
     $sql .= " ORDER BY helpful_count DESC, r.created_at DESC";
     $stmt = $mysqli->prepare($sql);
     $stmt->bind_param('iii', $userId, $courseId, $sessionFilter);
@@ -89,149 +90,169 @@ $stmt->close();
 
 $canWriteReview = ((int)$course['semester'] === $userSem);
 $csrf = csrfToken();
+
+navbarHeader($course['name'], '', 'courses.php', $course['code']);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= e($course['code']) ?> — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand:      #4F46E5;
-            --brand-dark: #3730A3;
-            --brand-soft: #EEF2FF;
-            --danger:     #EF4444;
-            --danger-soft:#FEF2F2;
-            --success:    #22C55E;
-            --warning:    #EAB308;
-            --bg:         #F1F5F9;
-            --card:       #FFFFFF;
-            --text:       #1E293B;
-            --muted:      #64748B;
-            --border:     #E2E8F0;
-            --radius:     14px;
-            --shadow:     0 2px 12px rgba(0,0,0,.06);
-        }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg); color: var(--text);
-            min-height: 100vh; padding-bottom: 80px;
-        }
+<style>
+    /* ── Course info card ── */
+    .info-card {
+        background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
+        border-radius: var(--radius); padding: 20px 18px; color: #fff; margin-bottom: 14px;
+    }
+    .info-meta { font-size: 0.78rem; opacity: .85; font-weight: 600; margin-bottom: 4px; }
+    .info-name { font-size: 1.25rem; font-weight: 800; margin-bottom: 6px; line-height: 1.3; }
+    .info-dept { font-size: 0.78rem; opacity: .8; }
 
-        .topbar {
-            position: sticky; top: 0; z-index: 50;
-            background: var(--card); border-bottom: 1px solid var(--border);
-            padding: 12px 16px; display: flex; align-items: center; gap: 10px;
-        }
-        .back-btn { width:34px; height:34px; border-radius:50%; background:var(--brand-soft); color:var(--brand-dark); display:flex; align-items:center; justify-content:center; text-decoration:none; font-size:1.05rem; flex-shrink:0; }
-        .topbar-title { font-size: 1rem; font-weight: 700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* ── Aggregate ratings ── */
+    .agg-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
+    .agg-title { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+    .agg-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); }
+    .agg-row:last-of-type { border-bottom: none; }
+    .agg-label { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+    .agg-right { display: flex; align-items: center; gap: 8px; }
+    .agg-stars { color: var(--warning); font-size: 0.95rem; letter-spacing: 1px; }
+    .agg-num { font-size: 0.85rem; font-weight: 700; min-width: 28px; text-align: right; }
+    .agg-footer { font-size: 0.74rem; color: var(--muted); text-align: center; margin-top: 8px; }
+    .no-data { text-align: center; padding: 14px 0; color: var(--muted); font-size: 0.85rem; }
 
-        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+    /* ── Write review CTA ── */
+    .cta-row { margin-bottom: 14px; }
+    .write-cta {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        background: var(--brand); color: #fff; text-decoration: none;
+        border-radius: 12px; padding: 12px; font-size: 0.9rem; font-weight: 700;
+        box-shadow: var(--shadow); transition: background .15s;
+    }
+    .write-cta:hover { background: var(--brand-dark); }
+    .cta-note { font-size: 0.74rem; color: var(--muted); text-align: center; background: var(--card); border-radius: 10px; padding: 10px; box-shadow: var(--shadow); }
 
-        /* Course info card */
-        .info-card {
-            background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
-            border-radius: var(--radius); padding: 20px 18px; color: #fff; margin-bottom: 14px;
-        }
-        .info-meta { font-size: 0.78rem; opacity: .85; font-weight: 600; margin-bottom: 4px; }
-        .info-name { font-size: 1.25rem; font-weight: 800; margin-bottom: 6px; line-height:1.3; }
-        .info-dept { font-size: 0.78rem; opacity: .8; }
+    /* ── Session chips ── */
+    .chip-scroll { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px; scrollbar-width: none; }
+    .chip-scroll::-webkit-scrollbar { display: none; }
+    .chip {
+        flex-shrink: 0; padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700;
+        background: var(--card); color: var(--muted); border: 1.5px solid var(--border);
+        text-decoration: none; white-space: nowrap;
+    }
+    .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 
-        /* Aggregate ratings */
-        .agg-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
-        .agg-title { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
-        .agg-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); }
-        .agg-row:last-of-type { border-bottom: none; }
-        .agg-label { font-size: 0.88rem; font-weight: 600; color: var(--text); }
-        .agg-right { display: flex; align-items: center; gap: 8px; }
-        .agg-stars { color: var(--warning); font-size: 0.95rem; letter-spacing: 1px; }
-        .agg-num { font-size: 0.85rem; font-weight: 700; min-width: 28px; text-align: right; }
-        .agg-footer { font-size: 0.74rem; color: var(--muted); text-align: center; margin-top: 8px; }
-        .no-data { text-align: center; padding: 14px 0; color: var(--muted); font-size: 0.85rem; }
+    .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
 
-        /* Write review CTA */
-        .cta-row { margin-bottom: 14px; }
-        .write-cta {
-            display: flex; align-items: center; justify-content: center; gap: 6px;
-            background: var(--brand); color: #fff; text-decoration: none;
-            border-radius: 12px; padding: 12px; font-size: 0.9rem; font-weight: 700;
-            box-shadow: var(--shadow); transition: background .15s;
-        }
-        .write-cta:hover { background: var(--brand-dark); }
-        .cta-note { font-size: 0.74rem; color: var(--muted); text-align:center; margin-top:6px; background:var(--card); border-radius:10px; padding:10px; box-shadow:var(--shadow); }
+    /* ── Facebook-style post card ── */
+    .post-card {
+        background: var(--card);
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,.10);
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
 
-        /* Session chips */
-        .chip-scroll { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 14px; scrollbar-width: none; }
-        .chip-scroll::-webkit-scrollbar { display: none; }
-        .chip {
-            flex-shrink: 0; padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700;
-            background: var(--card); color: var(--muted); border: 1.5px solid var(--border);
-            text-decoration: none; white-space: nowrap;
-        }
-        .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+    /* Post header */
+    .post-header {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 14px 0;
+    }
+    .post-avatar {
+        width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+        background: var(--brand);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.85rem; font-weight: 700; color: #fff;
+    }
+    .post-meta { flex: 1; min-width: 0; }
+    .post-name {
+        font-size: 0.92rem; font-weight: 700; color: var(--text); line-height: 1.3;
+    }
+    .post-name a {
+        color: var(--brand); text-decoration: none;
+    }
+    .post-name a:hover { text-decoration: underline; }
+    .post-sub {
+        font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+        display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .post-sub .dot { color: var(--border); }
 
-        .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+    .star-badge {
+        display: flex; align-items: center; gap: 3px;
+        background: #fff8e1; border: 1px solid #ffe082;
+        border-radius: 20px; padding: 4px 10px; flex-shrink: 0;
+    }
+    .star-badge .sb-star { color: #f5a623; font-size: 0.88rem; }
+    .star-badge .sb-num  { font-size: 0.82rem; font-weight: 700; color: #5d4037; }
+    .star-badge.low { background: #fff0f0; border-color: #ffcdd2; }
+    .star-badge.low .sb-num { color: #b71c1c; }
 
-        /* Review card */
-        .review-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 10px; }
-        .rcard-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-        .rcard-teacher { font-size: 0.95rem; font-weight: 700; }
-        .rcard-stars { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; white-space:nowrap; }
-        .rcard-num { font-size: 0.78rem; font-weight: 700; color: var(--text); margin-left: 4px; }
-        .rcard-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; margin-bottom: 10px; }
-        .rcard-comment { font-size: 0.88rem; line-height: 1.5; color: var(--text); margin-bottom: 12px; }
-        .rcard-comment.empty { color: var(--muted); font-style: italic; }
+    /* Post body: comment + rating chips */
+    .post-body { padding: 10px 14px 12px; }
+    .post-comment {
+        font-size: 1.5rem; line-height: 1.65; color: var(--text);
+        margin-bottom: 12px;
+    }
+    .post-comment.empty { color: var(--muted); font-style: italic; font-size: 0.9rem; }
 
-        .ratings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-bottom: 12px; padding-top:10px; border-top:1px solid var(--border); }
-        .rating-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; }
-        .rating-label { color: var(--muted); font-weight: 600; }
-        .rating-stars { color: var(--warning); font-size: 0.8rem; }
+    .rating-strip { display: flex; gap: 5px; }
+    .r-chip {
+        display: flex; align-items: center; gap: 4px; flex: 1;
+        background: var(--bg); border-radius: 6px; padding: 6px 8px;
+        font-size: 0.65rem;
+    }
+    .r-chip .rl { color: var(--muted); font-weight: 700; font-size: 0.60rem; }
+    .r-chip .rs { color: var(--warning); font-size: 0.60rem; letter-spacing: 0.5px; }
 
-        .rcard-bottom { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
-        .vote-actions { display: flex; align-items: center; gap: 6px; }
-        .vote-btn {
-            display: flex; align-items: center; gap: 4px; background: var(--bg); border: 1.5px solid var(--border);
-            border-radius: 20px; padding: 5px 11px; font-size: 0.76rem; font-weight: 700; color: var(--muted);
-            cursor: pointer; transition: all .15s;
-        }
-        .vote-btn.active.helpful     { background: #F0FDF4; border-color: var(--success); color: #166534; }
-        .vote-btn.active.not_helpful { background: var(--danger-soft); border-color: var(--danger); color: #991B1B; }
-        .vote-btn:disabled { cursor: not-allowed; opacity: .5; }
-        .flag-btn {
-            background: none; border: none; cursor: pointer; font-size: 0.95rem; color: var(--muted);
-            padding: 5px; border-radius: 8px; transition: background .15s;
-        }
-        .flag-btn:hover { background: var(--danger-soft); }
-        .flag-btn.flagged { color: var(--danger); }
-        .rcard-time { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
-        .own-badge { font-size: 0.72rem; color: var(--brand); font-weight: 700; }
+    /* Reaction count row */
+    .post-stats {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 7px 14px;
+        font-size: 0.78rem; color: var(--muted);
+        border-top: 1px solid var(--border);
+    }
+    .reaction-left { display: flex; align-items: center; gap: 5px; }
 
-        .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
-        .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
-        .empty-text { font-size: 0.85rem; color: var(--muted); }
+    /* Action buttons row */
+    .post-actions {
+        display: flex;
+        border-top: 1px solid var(--border);
+    }
+    .act-btn {
+        flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+        padding: 9px 6px; border: none; background: none;
+        font-size: 0.78rem; font-weight: 700; color: var(--muted);
+        cursor: pointer; transition: background .12s; font-family: inherit;
+        border-radius: 0;
+    }
+    .act-btn:hover { background: var(--bg); }
+    .act-btn.act-helpful.voted     { color: #1877f2; }
+    .act-btn.act-nothelpful.voted  { color: var(--danger); }
+    .act-btn.act-flag { border-left: 1px solid var(--border); }
+    .act-btn.act-flag:hover { color: var(--danger); background: var(--danger-soft); }
+    .act-btn.act-flag.flagged { color: var(--danger); }
 
-        .bottombar {
-            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-            background: var(--card); border-top: 1px solid var(--border);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
-        }
-        .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; text-decoration:none; color:var(--muted); font-size:0.62rem; font-weight:600; flex:1; padding:4px 0; }
-        .nav-item .icon { font-size:1.2rem; line-height:1; }
-        .nav-item.active { color: var(--brand); }
-    </style>
-</head>
-<body>
+    /* Post footer: course tag */
+    .post-footer {
+        padding: 8px 14px 10px;
+        border-top: 1px solid var(--border);
+        background: var(--bg);
+    }
+    .course-tag {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 6px; padding: 5px 10px;
+        font-size: 0.75rem; font-weight: 700; color: var(--brand);
+        text-decoration: none;
+    }
+    .own-label {
+        font-size: 0.75rem; color: var(--brand); font-weight: 700;
+        display: flex; align-items: center; gap: 4px;
+    }
 
-<header class="topbar">
-    <a href="courses.php" class="back-btn">←</a>
-    <div class="topbar-title"><?= e($course['code']) ?> — <?= e($course['name']) ?></div>
-</header>
+    /* Empty state */
+    .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
+    .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
+    .empty-text  { font-size: 0.85rem; color: var(--muted); }
+</style>
 
-<div class="container">
+<div class="fr-container">
 
     <!-- Course info -->
     <div class="info-card">
@@ -295,89 +316,154 @@ $csrf = csrfToken();
         </div>
     <?php else: ?>
         <?php foreach ($reviews as $r):
-            $isOwn = ((int)$r['user_id'] === $userId);
-            $myVote = $r['my_vote'];
+            $isOwn   = ((int)$r['user_id'] === $userId);
+            $myVote  = $r['my_vote'];
+            $overall = (float)$r['rating_overall'];
+            $isLow   = $overall < 3;
+
+            // Avatar initials from teacher name
+            $initials = '';
+            foreach (explode(' ', $r['teacher_name']) as $part) {
+                $p = preg_replace('/[^A-Za-z]/', '', $part);
+                if ($p !== '') $initials .= strtoupper($p[0]);
+                if (strlen($initials) >= 2) break;
+            }
         ?>
-        <div class="review-card" data-review-id="<?= (int)$r['id'] ?>">
-            <div class="rcard-top">
-                <div class="rcard-teacher">👨‍🏫 <?= e($r['teacher_name']) ?></div>
-                <div><span class="rcard-stars"><?= starDisplay((float)$r['rating_overall']) ?></span><span class="rcard-num"><?= number_format((float)$r['rating_overall'], 1) ?></span></div>
-            </div>
-            <div class="rcard-meta">📅 <?= e($r['session_label']) ?></div>
+        <div class="post-card" data-review-id="<?= (int)$r['id'] ?>">
 
-            <?php if (trim((string)$r['comment']) !== ''): ?>
-                <div class="rcard-comment">"<?= e($r['comment']) ?>"</div>
-            <?php else: ?>
-                <div class="rcard-comment empty">No comment written.</div>
-            <?php endif; ?>
-
-            <div class="ratings-grid">
-                <div class="rating-row"><span class="rating-label">Teaching</span><span class="rating-stars"><?= starDisplay((float)$r['rating_teaching']) ?></span></div>
-                <div class="rating-row"><span class="rating-label">Workload</span><span class="rating-stars"><?= starDisplay((float)$r['rating_workload']) ?></span></div>
-                <div class="rating-row"><span class="rating-label">Grading</span><span class="rating-stars"><?= starDisplay((float)$r['rating_grading']) ?></span></div>
-                <div class="rating-row"><span class="rating-label">Overall</span><span class="rating-stars"><?= starDisplay((float)$r['rating_overall']) ?></span></div>
-            </div>
-
-            <div class="rcard-bottom">
-                <?php if ($isOwn): ?>
-                    <span class="own-badge">📝 This is your review</span>
-                <?php else: ?>
-                    <div class="vote-actions">
-                        <button type="button"
-                            class="vote-btn helpful <?= $myVote === 'helpful' ? 'active helpful' : '' ?>"
-                            onclick="castVote(<?= (int)$r['id'] ?>, 'helpful', this)">
-                            👍 <span class="helpful-count"><?= (int)$r['helpful_count'] ?></span>
-                        </button>
-                        <button type="button"
-                            class="vote-btn not_helpful <?= $myVote === 'not_helpful' ? 'active not_helpful' : '' ?>"
-                            onclick="castVote(<?= (int)$r['id'] ?>, 'not_helpful', this)">
-                            👎 <span class="not-helpful-count"><?= (int)$r['not_helpful_count'] ?></span>
-                        </button>
-                        <button type="button" class="flag-btn" onclick="flagReview(<?= (int)$r['id'] ?>, this)" title="Flag this review">🚩</button>
+            <!-- Header -->
+            <div class="post-header">
+                <div class="post-avatar"><?= e($initials ?: '?') ?></div>
+                <div class="post-meta">
+                    <div class="post-name">
+                        <a href="teacher_detail.php?id=<?= (int)$r['teacher_id'] ?>"><?= e($r['teacher_name']) ?></a>
                     </div>
-                <?php endif; ?>
-                <span class="rcard-time">Reviewed: <?= timeAgo($r['created_at']) ?></span>
+                    <div class="post-sub">
+                        <span>📅 <?= e($r['session_label']) ?></span>
+                        <span class="dot">·</span>
+                        <span><?= semesterLabel((int)$r['semester_taken']) ?></span>
+                        <span class="dot">·</span>
+                        <span>🌎 <?= timeAgo($r['created_at']) ?></span>
+                    </div>
+                </div>
+                <div class="star-badge <?= $isLow ? 'low' : '' ?>">
+                    <span class="sb-star">★</span>
+                    <span class="sb-num"><?= number_format($overall, 1) ?></span>
+                </div>
             </div>
+
+            <!-- Body: comment + rating chips -->
+            <div class="post-body">
+                <?php if (trim((string)$r['comment']) !== ''): ?>
+                    <div class="post-comment"><?= e($r['comment']) ?></div>
+                <?php else: ?>
+                    <div class="post-comment empty">No comment written.</div>
+                <?php endif; ?>
+
+                <div class="rating-strip">
+                    <div class="r-chip">
+                        <span class="rl">Teaching</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_teaching']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Workload</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_workload']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Grading</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_grading']) ?></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reaction counts -->
+            <!-- <div class="post-stats">
+                <div class="reaction-left">
+                    <?php if ((int)$r['helpful_count'] > 0): ?>
+                        👍 <?= (int)$r['helpful_count'] ?> found helpful
+                    <?php else: ?>
+                        <span>No helpful votes yet</span>
+                    <?php endif; ?>
+                </div>
+                <?php if ((int)$r['not_helpful_count'] > 0): ?>
+                    <span>👎 <?= (int)$r['not_helpful_count'] ?> not helpful</span>
+                <?php endif; ?>
+            </div> -->
+
+            <!-- Action buttons -->
+            <div class="post-actions">
+                <?php if ($isOwn): ?>
+                    <div class="act-btn" style="cursor:default;">
+                        <span class="own-label">📝 Your review</span>
+                    </div>
+                <?php else: ?>
+                    <button type="button"
+                        class="act-btn act-helpful <?= $myVote === 'helpful' ? 'voted' : '' ?>"
+                        onclick="castVote(<?= (int)$r['id'] ?>, 'helpful', this)">
+                        👍 <span class="helpful-count"><?= (int)$r['helpful_count'] ?> Helpful</span>
+                    </button>
+                    <button type="button"
+                        class="act-btn act-nothelpful <?= $myVote === 'not_helpful' ? 'voted' : '' ?>"
+                        onclick="castVote(<?= (int)$r['id'] ?>, 'not_helpful', this)">
+                        👎 <span class="not-helpful-count"><?= (int)$r['not_helpful_count'] ?> Not Helpful</span>
+                    </button>
+                    <!-- <button type="button"
+                        class="act-btn act-flag"
+                        onclick="flagReview(<?= (int)$r['id'] ?>, this)"
+                        title="Flag this review">
+                        🚩 Flag
+                    </button> -->
+                <?php endif; ?>
+            </div>
+
+            <!-- Footer: course tag -->
+            <!-- <div class="post-footer">
+                <span class="course-tag">📚 <?= e($course['code']) ?> — <?= e($course['name']) ?></span>
+            </div> -->
+
         </div>
         <?php endforeach; ?>
     <?php endif; ?>
 
 </div>
 
-<nav class="bottombar">
-    <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
-    <a href="courses.php"   class="nav-item active"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="search.php"    class="nav-item"><span class="icon">🔍</span><span>Search</span></a>
-    <a href="submit_review.php" class="nav-item"><span class="icon">✏️</span><span>Review</span></a>
-    <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
-</nav>
-
 <script>
     const CSRF = <?= json_encode($csrf) ?>;
 
     async function castVote(reviewId, voteType, btn) {
-        const card = btn.closest('.review-card');
+        const card = btn.closest('.post-card');
         try {
             const res = await fetch('vote.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `review_id=${encodeURIComponent(reviewId)}&vote=${encodeURIComponent(voteType)}&csrf_token=${encodeURIComponent(CSRF)}`
+                body: 'review_id=' + encodeURIComponent(reviewId) + '&vote=' + encodeURIComponent(voteType) + '&csrf_token=' + encodeURIComponent(CSRF)
             });
             const data = await res.json();
             if (!data.success) { alert(data.message || 'Could not register vote.'); return; }
 
-            const helpfulBtn = card.querySelector('.vote-btn.helpful');
-            const notHelpfulBtn = card.querySelector('.vote-btn.not_helpful');
-            helpfulBtn.querySelector('.helpful-count').textContent = data.helpful_count;
-            notHelpfulBtn.querySelector('.not-helpful-count').textContent = data.not_helpful_count;
+            const helpfulBtn    = card.querySelector('.act-btn.act-helpful');
+            const notHelpfulBtn = card.querySelector('.act-btn.act-nothelpful');
 
-            helpfulBtn.classList.remove('active', 'helpful');
-            notHelpfulBtn.classList.remove('active', 'not_helpful');
-            helpfulBtn.classList.add('helpful');
-            notHelpfulBtn.classList.add('not_helpful');
+            helpfulBtn.querySelector('.helpful-count').textContent     = data.helpful_count + ' Helpful';
+            notHelpfulBtn.querySelector('.not-helpful-count').textContent = data.not_helpful_count + ' Not Helpful';
 
-            if (data.my_vote === 'helpful') helpfulBtn.classList.add('active');
-            if (data.my_vote === 'not_helpful') notHelpfulBtn.classList.add('active');
+            helpfulBtn.classList.remove('voted');
+            notHelpfulBtn.classList.remove('voted');
+
+            if (data.my_vote === 'helpful')     helpfulBtn.classList.add('voted');
+            if (data.my_vote === 'not_helpful') notHelpfulBtn.classList.add('voted');
+
+            // Update stats row
+            const statsLeft  = card.querySelector('.reaction-left');
+            const statsRight = card.querySelector('.post-stats span:last-child');
+            if (data.helpful_count > 0) {
+                statsLeft.innerHTML = '👍 ' + data.helpful_count + ' found helpful';
+            } else {
+                statsLeft.innerHTML = '<span>No helpful votes yet</span>';
+            }
+            if (statsRight) {
+                statsRight.textContent = data.not_helpful_count > 0 ? '👎 ' + data.not_helpful_count + ' not helpful' : '';
+            }
         } catch (e) {
             alert('Network error. Please try again.');
         }
@@ -389,11 +475,11 @@ $csrf = csrfToken();
             const res = await fetch('flag.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `review_id=${encodeURIComponent(reviewId)}&csrf_token=${encodeURIComponent(CSRF)}`
+                body: 'review_id=' + encodeURIComponent(reviewId) + '&csrf_token=' + encodeURIComponent(CSRF)
             });
             const data = await res.json();
             if (data.success) {
-                btn.textContent = '🚩';
+                btn.textContent = '🚩 Flagged';
                 btn.classList.add('flagged');
                 btn.disabled = true;
                 btn.title = 'Flagged — pending admin review';
@@ -405,5 +491,5 @@ $csrf = csrfToken();
         }
     }
 </script>
-</body>
-</html>
+
+<?php navbarFooter('student', 'courses'); ?>

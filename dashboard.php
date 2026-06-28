@@ -6,6 +6,7 @@
 // ============================================================
 require_once 'db.php';
 requireLogin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -31,9 +32,11 @@ $stmt = $mysqli->prepare("
         r.is_flagged,
         r.semester_taken,
         r.created_at,
+        c.id          AS course_id,
         c.code        AS course_code,
         c.name        AS course_name,
         c.semester    AS course_semester,
+        t.id          AS teacher_id,
         t.name        AS teacher_name,
         s.label       AS session_label
     FROM reviews r
@@ -48,323 +51,210 @@ $stmt->execute();
 $reviews = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-$totalReviews   = count($reviews);
-$approvedCount  = count(array_filter($reviews, fn($r) => $r['is_approved'] == 1));
-$pendingCount   = $totalReviews - $approvedCount;
+$totalReviews  = count($reviews);
+$approvedCount = count(array_filter($reviews, function($r) { return $r['is_approved'] == 1; }));
+$pendingCount  = $totalReviews - $approvedCount;
+
+$csrf = csrfToken();
+
+navbarHeader('Dashboard', 'home');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<style>
+    /* ── Profile hero ── */
+    .profile-card {
+        background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
+        border-radius: var(--radius);
+        padding: 20px 18px;
+        color: #fff;
+        margin-bottom: 14px;
+        display: flex; align-items: center; gap: 14px;
+    }
+    .profile-avatar {
+        width: 52px; height: 52px; border-radius: 50%;
+        background: rgba(255,255,255,.2);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.4rem; font-weight: 800;
+        flex-shrink: 0; border: 2px solid rgba(255,255,255,.4);
+    }
+    .profile-info { flex: 1; min-width: 0; }
+    .profile-name  { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; }
+    .profile-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pchip {
+        background: rgba(255,255,255,.18);
+        border-radius: 20px; padding: 3px 10px;
+        font-size: 0.72rem; font-weight: 600;
+        border: 1px solid rgba(255,255,255,.25);
+        white-space: nowrap;
+    }
 
-        :root {
-            --brand:      #4F46E5;
-            --brand-dark: #3730A3;
-            --brand-soft: #EEF2FF;
-            --danger:     #EF4444;
-            --danger-soft:#FEF2F2;
-            --success:    #22C55E;
-            --success-soft:#F0FDF4;
-            --warning:    #EAB308;
-            --warning-soft:#FEFCE8;
-            --pending:    #F97316;
-            --pending-soft:#FFF7ED;
-            --bg:         #F1F5F9;
-            --card:       #FFFFFF;
-            --text:       #1E293B;
-            --muted:      #64748B;
-            --border:     #E2E8F0;
-            --radius:     14px;
-            --shadow:     0 2px 12px rgba(0,0,0,.06);
-        }
+    /* ── Stats row ── */
+    .stats-row {
+        display: grid; grid-template-columns: repeat(3, 1fr);
+        gap: 10px; margin-bottom: 16px;
+    }
+    .stat-card {
+        background: var(--card); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 14px 10px; text-align: center;
+    }
+    .stat-num   { font-size: 1.6rem; font-weight: 800; color: var(--brand); }
+    .stat-label { font-size: 0.7rem; color: var(--muted); margin-top: 2px; font-weight: 600; }
 
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            padding-bottom: 80px;
-        }
+    /* ── Section header ── */
+    .section-head {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 12px;
+    }
+    .section-title { font-size: 1rem; font-weight: 700; }
+    .write-btn {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: var(--brand); color: #fff;
+        border-radius: 20px; padding: 7px 14px;
+        font-size: 0.78rem; font-weight: 700; text-decoration: none;
+        transition: background .15s;
+    }
+    .write-btn:hover { background: var(--brand-dark); }
 
-        /* ── Topbar ── */
-        .topbar {
-            position: sticky; top: 0; z-index: 50;
-            background: var(--card);
-            border-bottom: 1px solid var(--border);
-            padding: 12px 16px;
-            display: flex; align-items: center; justify-content: space-between;
-        }
-        .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-        .topbar-icon {
-            width: 32px; height: 32px; background: var(--brand);
-            border-radius: 9px; display: flex; align-items: center;
-            justify-content: center; font-size: 16px;
-        }
-        .topbar-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
-        .topbar-name span { color: var(--brand); }
-        .topbar-right { display: flex; align-items: center; gap: 8px; }
-        .avatar {
-            width: 34px; height: 34px; border-radius: 50%;
-            background: var(--brand-soft); color: var(--brand-dark);
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 700; font-size: 0.85rem; text-decoration: none;
-            flex-shrink: 0;
-        }
+    /* ── Facebook-style post card ── */
+    .post-card {
+        background: var(--card);
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,.10);
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
 
-        /* ── Container ── */
-        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+    /* Post header */
+    .post-header {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 14px 0;
+    }
+    .post-avatar {
+        width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+        background: var(--brand);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.85rem; font-weight: 700; color: #fff;
+    }
+    .post-meta { flex: 1; min-width: 0; }
+    .post-name {
+        font-size: 0.92rem; font-weight: 700; color: var(--text); line-height: 1.3;
+    }
+    .post-sub {
+        font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+        display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .post-sub .dot { color: var(--border); }
 
-        /* ── Flash message ── */
-        .flash {
-            border-radius: 10px; padding: 12px 14px;
-            font-size: 0.85rem; font-weight: 600;
-            margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
-        }
-        .flash-success { background: var(--success-soft); color: #166534; border-left: 4px solid var(--success); }
-        .flash-error   { background: var(--danger-soft);  color: #991B1B; border-left: 4px solid var(--danger);  }
+    /* Star badge */
+    .star-badge {
+        display: flex; align-items: center; gap: 3px;
+        background: #fff8e1; border: 1px solid #ffe082;
+        border-radius: 20px; padding: 4px 10px; flex-shrink: 0;
+    }
+    .star-badge .sb-star { color: #f5a623; font-size: 0.88rem; }
+    .star-badge .sb-num  { font-size: 0.82rem; font-weight: 700; color: #5d4037; }
+    .star-badge.low { background: #fff0f0; border-color: #ffcdd2; }
+    .star-badge.low .sb-star,
+    .star-badge.low .sb-num { color: #b71c1c; }
 
-        /* ── Profile hero ── */
-        .profile-card {
-            background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
-            border-radius: var(--radius);
-            padding: 20px 18px;
-            color: #fff;
-            margin-bottom: 14px;
-            display: flex; align-items: center; gap: 14px;
-        }
-        .profile-avatar {
-            width: 52px; height: 52px; border-radius: 50%;
-            background: rgba(255,255,255,.2);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.4rem; font-weight: 800;
-            flex-shrink: 0; border: 2px solid rgba(255,255,255,.4);
-        }
-        .profile-info { flex: 1; min-width: 0; }
-        .profile-name  { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; }
-        .profile-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-        .pchip {
-            background: rgba(255,255,255,.18);
-            border-radius: 20px; padding: 3px 10px;
-            font-size: 0.72rem; font-weight: 600;
-            border: 1px solid rgba(255,255,255,.25);
-            white-space: nowrap;
-        }
+    /* Status pill row */
+    .status-row { padding: 8px 14px 0; }
+    .status-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        border-radius: 20px; padding: 3px 10px;
+        font-size: 0.68rem; font-weight: 700; white-space: nowrap;
+    }
+    .badge-approved { background: var(--success-soft); color: #166534; }
+    .badge-pending  { background: var(--pending-soft); color: #9A3412; }
+    .badge-flagged  { background: var(--danger-soft);  color: #991B1B; }
 
-        /* ── Stats row ── */
-        .stats-row {
-            display: grid; grid-template-columns: repeat(3, 1fr);
-            gap: 10px; margin-bottom: 16px;
-        }
-        .stat-card {
-            background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 14px 10px; text-align: center;
-        }
-        .stat-num  { font-size: 1.6rem; font-weight: 800; color: var(--brand); }
-        .stat-label { font-size: 0.7rem; color: var(--muted); margin-top: 2px; font-weight: 600; }
+    /* Post body */
+    .post-body { padding: 10px 14px 12px; }
+    .post-comment {
+        font-size: 1.25rem; line-height: 1.65; color: var(--text);
+        margin-bottom: 12px;
+    }
+    .post-comment.empty { color: var(--muted); font-style: italic; }
 
-        /* ── Section header ── */
-        .section-head {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 12px;
-        }
-        .section-title { font-size: 1rem; font-weight: 700; }
-        .write-btn {
-            display: inline-flex; align-items: center; gap: 5px;
-            background: var(--brand); color: #fff;
-            border-radius: 20px; padding: 7px 14px;
-            font-size: 0.78rem; font-weight: 700; text-decoration: none;
-            transition: background .15s;
-        }
-        .write-btn:hover { background: var(--brand-dark); }
+    /* Rating strip */
+    .rating-strip { display: flex; gap: 5px; }
+    .r-chip {
+        display: flex; flex-direction: column; gap: 2px;
+        flex: 1; background: var(--bg); border-radius: 6px; padding: 6px 8px;
+    }
+    .r-chip .rl { color: var(--muted); font-weight: 700; font-size: 0.60rem; }
+    .r-chip .rs { color: var(--warning); font-size: 0.60rem; letter-spacing: 0.5px; }
 
-        /* ── Review card ── */
-        .review-card {
-            background: var(--card);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            padding: 14px 16px;
-            margin-bottom: 10px;
-            border-left: 4px solid transparent;
-        }
-        .review-card.approved { border-left-color: var(--success); }
-        .review-card.pending  { border-left-color: var(--pending); }
-        .review-card.flagged  { border-left-color: var(--danger);  }
+    /* Action buttons row */
+    .post-actions {
+        display: flex;
+        border-top: 1px solid var(--border);
+    }
+    .act-btn {
+        flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+        padding: 9px 6px; border: none; background: none;
+        font-size: 0.78rem; font-weight: 700; color: var(--muted);
+        cursor: pointer; transition: background .12s; font-family: inherit;
+    }
+    .act-btn:hover { background: var(--bg); }
+    .act-btn.act-delete { border-left: 1px solid var(--border); }
+    .act-btn.act-delete:hover { color: var(--danger); background: var(--danger-soft); }
 
-        /* card top row */
-        .card-top {
-            display: flex; justify-content: space-between;
-            align-items: flex-start; gap: 8px; margin-bottom: 8px;
-        }
-        .card-top-left { flex: 1; min-width: 0; }
-        .course-code {
-            font-size: 0.68rem; font-weight: 700;
-            color: var(--brand); text-transform: uppercase;
-            letter-spacing: .04em; margin-bottom: 2px;
-        }
-        .course-name {
-            font-size: 0.95rem; font-weight: 700;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .teacher-line {
-            font-size: 0.78rem; color: var(--muted); margin-top: 2px;
-        }
+    .own-label {
+        font-size: 0.75rem; color: var(--brand); font-weight: 700;
+        display: flex; align-items: center; gap: 4px;
+    }
 
-        /* status badge */
-        .status-badge {
-            flex-shrink: 0;
-            border-radius: 20px; padding: 3px 10px;
-            font-size: 0.68rem; font-weight: 700;
-            white-space: nowrap;
-        }
-        .badge-approved { background: var(--success-soft); color: #166534; }
-        .badge-pending  { background: var(--pending-soft); color: #9A3412; }
-        .badge-flagged  { background: var(--danger-soft);  color: #991B1B; }
+    /* ── Empty state ── */
+    .empty-state {
+        background: var(--card); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 40px 20px;
+        text-align: center;
+    }
+    .empty-emoji { font-size: 2.4rem; margin-bottom: 10px; }
+    .empty-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+    .empty-sub   { font-size: 0.83rem; color: var(--muted); margin-bottom: 18px; line-height: 1.5; }
+    .empty-cta {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: var(--brand); color: #fff;
+        border-radius: 10px; padding: 10px 20px;
+        font-size: 0.88rem; font-weight: 700; text-decoration: none;
+    }
+    .empty-cta:hover { background: var(--brand-dark); }
 
-        /* session + date row */
-        .card-meta {
-            display: flex; align-items: center; gap: 10px;
-            font-size: 0.75rem; color: var(--muted);
-            margin-bottom: 10px; flex-wrap: wrap;
-        }
-        .meta-dot { color: var(--border); }
+    /* ── Delete confirm modal ── */
+    .modal-overlay {
+        display: none; position: fixed; inset: 0; z-index: 100;
+        background: rgba(0,0,0,.45); align-items: center; justify-content: center;
+        padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+        background: var(--card); border-radius: var(--radius);
+        padding: 24px 20px; max-width: 340px; width: 100%;
+        box-shadow: 0 20px 60px rgba(0,0,0,.2);
+    }
+    .modal-icon  { font-size: 2rem; margin-bottom: 10px; text-align: center; }
+    .modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; text-align: center; }
+    .modal-sub   { font-size: 0.83rem; color: var(--muted); text-align: center; margin-bottom: 20px; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 10px; }
+    .modal-cancel {
+        flex: 1; padding: 11px; border-radius: 10px;
+        border: 1.5px solid var(--border); background: var(--bg);
+        font-size: 0.9rem; font-weight: 600; cursor: pointer; color: var(--text);
+    }
+    .modal-confirm {
+        flex: 1; padding: 11px; border-radius: 10px;
+        border: none; background: var(--danger);
+        font-size: 0.9rem; font-weight: 700; cursor: pointer; color: #fff;
+    }
+    .modal-confirm:hover { background: #DC2626; }
+</style>
 
-        /* comment */
-        .comment-text {
-            font-size: 0.87rem; color: var(--text);
-            line-height: 1.55; margin-bottom: 12px;
-            font-style: italic;
-        }
-        .comment-text.empty { color: var(--muted); font-style: normal; }
-
-        /* ratings grid */
-        .ratings-grid {
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 6px 12px; margin-bottom: 12px;
-        }
-        .rating-row {
-            display: flex; align-items: center; justify-content: space-between;
-        }
-        .rating-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
-        .rating-stars { font-size: 0.8rem; color: var(--warning); letter-spacing: 1px; }
-
-        /* overall stars */
-        .overall-stars {
-            display: flex; align-items: center; gap: 6px; margin-bottom: 12px;
-        }
-        .overall-stars .stars { font-size: 1.1rem; color: var(--warning); }
-        .overall-num { font-size: 0.85rem; font-weight: 700; color: var(--text); }
-
-        /* card bottom: delete */
-        .card-bottom {
-            display: flex; align-items: center; justify-content: space-between;
-            border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px;
-        }
-        .submitted-at { font-size: 0.72rem; color: var(--muted); }
-        .delete-form { display: inline; }
-        .delete-btn {
-            display: inline-flex; align-items: center; gap: 5px;
-            background: var(--danger-soft); color: var(--danger);
-            border: 1.5px solid #FECACA;
-            border-radius: 8px; padding: 6px 12px;
-            font-size: 0.75rem; font-weight: 700;
-            cursor: pointer; transition: background .15s;
-        }
-        .delete-btn:hover { background: #FEE2E2; }
-
-        /* ── Empty state ── */
-        .empty-state {
-            background: var(--card); border-radius: var(--radius);
-            box-shadow: var(--shadow); padding: 40px 20px;
-            text-align: center;
-        }
-        .empty-emoji { font-size: 2.4rem; margin-bottom: 10px; }
-        .empty-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
-        .empty-sub   { font-size: 0.83rem; color: var(--muted); margin-bottom: 18px; line-height: 1.5; }
-        .empty-cta {
-            display: inline-flex; align-items: center; gap: 6px;
-            background: var(--brand); color: #fff;
-            border-radius: 10px; padding: 10px 20px;
-            font-size: 0.88rem; font-weight: 700; text-decoration: none;
-        }
-        .empty-cta:hover { background: var(--brand-dark); }
-
-        /* ── Bottom nav ── */
-        .bottombar {
-            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-            background: var(--card); border-top: 1px solid var(--border);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
-        }
-        .nav-item {
-            display: flex; flex-direction: column; align-items: center; gap: 2px;
-            text-decoration: none; color: var(--muted);
-            font-size: 0.62rem; font-weight: 600; flex: 1; padding: 4px 0;
-            transition: color .15s;
-        }
-        .nav-item .icon { font-size: 1.2rem; line-height: 1; }
-        .nav-item.active { color: var(--brand); }
-        .nav-item:hover  { color: var(--brand); }
-
-        /* ── Delete confirm modal ── */
-        .modal-overlay {
-            display: none; position: fixed; inset: 0; z-index: 100;
-            background: rgba(0,0,0,.45); align-items: center; justify-content: center;
-            padding: 20px;
-        }
-        .modal-overlay.open { display: flex; }
-        .modal {
-            background: var(--card); border-radius: var(--radius);
-            padding: 24px 20px; max-width: 340px; width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,.2);
-        }
-        .modal-icon { font-size: 2rem; margin-bottom: 10px; text-align: center; }
-        .modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; text-align: center; }
-        .modal-sub   { font-size: 0.83rem; color: var(--muted); text-align: center; margin-bottom: 20px; line-height: 1.5; }
-        .modal-actions { display: flex; gap: 10px; }
-        .modal-cancel {
-            flex: 1; padding: 11px; border-radius: 10px;
-            border: 1.5px solid var(--border); background: var(--bg);
-            font-size: 0.9rem; font-weight: 600; cursor: pointer; color: var(--text);
-        }
-        .modal-confirm {
-            flex: 1; padding: 11px; border-radius: 10px;
-            border: none; background: var(--danger);
-            font-size: 0.9rem; font-weight: 700; cursor: pointer; color: #fff;
-        }
-        .modal-confirm:hover { background: #DC2626; }
-    </style>
-</head>
-<body>
-
-<!-- ── Topbar ── -->
-<header class="topbar">
-    <a href="dashboard.php" class="topbar-brand">
-        <div class="topbar-icon">🎓</div>
-        <span class="topbar-name">Faculty<span>Review</span></span>
-    </a>
-    <div class="topbar-right">
-        <a href="search.php" class="avatar" style="background:transparent;font-size:1.2rem;color:var(--muted)">🔍</a>
-        <div class="avatar"><?= e(strtoupper(substr($userName, 0, 1))) ?></div>
-    </div>
-</header>
-
-<div class="container">
+<div class="fr-container">
 
     <!-- ── Flash ── -->
-    <?php if ($flash): ?>
-        <?php
-            $isError   = str_starts_with($flash, 'error:');
-            $flashText = $isError ? substr($flash, 6) : $flash;
-        ?>
-        <div class="flash <?= $isError ? 'flash-error' : 'flash-success' ?>">
-            <?= $isError ? '❌' : '✅' ?> <?= e($flashText) ?>
-        </div>
-    <?php endif; ?>
+    <?php renderFlash($flash); ?>
 
     <!-- ── Profile hero ── -->
     <div class="profile-card">
@@ -416,75 +306,84 @@ $pendingCount   = $totalReviews - $approvedCount;
         <?php foreach ($reviews as $r):
             $isFlagged  = $r['is_flagged']  == 1;
             $isApproved = $r['is_approved'] == 1;
-            $cardClass  = $isFlagged ? 'flagged' : ($isApproved ? 'approved' : 'pending');
+            $overall    = (float)$r['rating_overall'];
+            $isLow      = $overall < 3;
+
+            // Avatar initials from teacher name
+            $initials = '';
+            foreach (explode(' ', $r['teacher_name']) as $part) {
+                $p = preg_replace('/[^A-Za-z]/', '', $part);
+                if ($p !== '') $initials .= strtoupper($p[0]);
+                if (strlen($initials) >= 2) break;
+            }
         ?>
-        <div class="review-card <?= $cardClass ?>">
+        <div class="post-card" data-review-id="<?= (int)$r['id'] ?>">
 
-            <!-- Top row: course info + status badge -->
-            <div class="card-top">
-                <div class="card-top-left">
-                    <div class="course-code"><?= e($r['course_code']) ?></div>
-                    <div class="course-name"><?= e($r['course_name']) ?></div>
-                    <div class="teacher-line">👨‍🏫 <?= e($r['teacher_name']) ?></div>
+            <!-- Header: teacher avatar + name + course sub + star badge -->
+            <div class="post-header">
+                <div class="post-avatar"><?= e($initials ?: '?') ?></div>
+                <div class="post-meta">
+                    <div class="post-name"><?= e($r['teacher_name']) ?></div>
+                    <div class="post-sub">
+                        <span><?= e($r['course_code']) ?> · <?= e($r['course_name']) ?></span>
+                        <span class="dot">·</span>
+                        <span>📅 <?= e($r['session_label']) ?></span>
+                        <span class="dot">·</span>
+                        <span>🌎 <?= timeAgo($r['created_at']) ?></span>
+                    </div>
                 </div>
-                <div>
-                    <?php if ($isFlagged): ?>
-                        <span class="status-badge badge-flagged">🚩 Flagged</span>
-                    <?php elseif ($isApproved): ?>
-                        <span class="status-badge badge-approved">✅ Approved</span>
-                    <?php else: ?>
-                        <span class="status-badge badge-pending">⏳ Pending</span>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- Meta: session + semester taken -->
-            <div class="card-meta">
-                <span>📅 <?= e($r['session_label']) ?></span>
-                <span class="meta-dot">·</span>
-                <span><?= semesterLabel((int)$r['semester_taken']) ?></span>
-                <span class="meta-dot">·</span>
-                <span><?= timeAgo($r['created_at']) ?></span>
-            </div>
-
-            <!-- Overall stars -->
-            <div class="overall-stars">
-                <span class="stars"><?= starDisplay((float)$r['rating_overall']) ?></span>
-                <span class="overall-num"><?= (int)$r['rating_overall'] ?>.0 Overall</span>
-            </div>
-
-            <!-- Comment -->
-            <?php if (!empty(trim($r['comment']))): ?>
-                <div class="comment-text">"<?= e($r['comment']) ?>"</div>
-            <?php else: ?>
-                <div class="comment-text empty">No comment written.</div>
-            <?php endif; ?>
-
-            <!-- Individual ratings 2×2 grid -->
-            <div class="ratings-grid">
-                <div class="rating-row">
-                    <span class="rating-label">Teaching</span>
-                    <span class="rating-stars"><?= starDisplay((float)$r['rating_teaching']) ?></span>
-                </div>
-                <div class="rating-row">
-                    <span class="rating-label">Workload</span>
-                    <span class="rating-stars"><?= starDisplay((float)$r['rating_workload']) ?></span>
-                </div>
-                <div class="rating-row">
-                    <span class="rating-label">Grading</span>
-                    <span class="rating-stars"><?= starDisplay((float)$r['rating_grading']) ?></span>
-                </div>
-                <div class="rating-row">
-                    <span class="rating-label">Overall</span>
-                    <span class="rating-stars"><?= starDisplay((float)$r['rating_overall']) ?></span>
+                <div class="star-badge <?= $isLow ? 'low' : '' ?>">
+                    <span class="sb-star">★</span>
+                    <span class="sb-num"><?= number_format($overall, 1) ?></span>
                 </div>
             </div>
 
-            <!-- Bottom: timestamp + delete -->
-            <div class="card-bottom">
-                <span class="submitted-at">Submitted <?= date('M j, Y', strtotime($r['created_at'])) ?></span>
+            <!-- Status pill -->
+            <div class="status-row">
+                <?php if ($isFlagged): ?>
+                    <span class="status-badge badge-flagged">🚩 Flagged</span>
+                <?php elseif ($isApproved): ?>
+                    <span class="status-badge badge-approved">✅ Approved</span>
+                <?php else: ?>
+                    <span class="status-badge badge-pending">⏳ Pending</span>
+                <?php endif; ?>
+            </div>
+
+            <!-- Body: comment + rating chips -->
+            <div class="post-body">
+                <?php if (!empty(trim((string)$r['comment']))): ?>
+                    <div class="post-comment">"<?= e($r['comment']) ?>"</div>
+                <?php else: ?>
+                    <div class="post-comment empty">No comment written.</div>
+                <?php endif; ?>
+
+                <div class="rating-strip">
+                    <div class="r-chip">
+                        <span class="rl">Teaching</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_teaching']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Workload</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_workload']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Grading</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_grading']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Overall</span>
+                        <span class="rs"><?= starDisplay($overall) ?></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="post-actions">
+                <div class="act-btn" style="cursor:default;">
+                    <span class="own-label">📝 Your review</span>
+                </div>
                 <button
-                    class="delete-btn"
+                    class="act-btn act-delete"
                     onclick="openDelete(<?= (int)$r['id'] ?>, '<?= e(addslashes($r['course_code'])) ?>')"
                     type="button"
                 >
@@ -496,7 +395,7 @@ $pendingCount   = $totalReviews - $approvedCount;
         <?php endforeach; ?>
     <?php endif; ?>
 
-</div><!-- /container -->
+</div><!-- /fr-container -->
 
 <!-- ── Delete confirm modal ── -->
 <div class="modal-overlay" id="deleteModal">
@@ -504,37 +403,18 @@ $pendingCount   = $totalReviews - $approvedCount;
         <div class="modal-icon">🗑️</div>
         <div class="modal-title">Delete this review?</div>
         <div class="modal-sub" id="modalSub">
-            This action cannot be undone. The review and all votes on it will be permanently removed.
+            This action cannot be undone. The review will be permanently removed.
         </div>
         <div class="modal-actions">
             <button class="modal-cancel" onclick="closeDelete()">Cancel</button>
             <form method="POST" action="delete_review.php" id="deleteForm" style="flex:1">
-                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
                 <input type="hidden" name="review_id" id="deleteReviewId" value="">
                 <button type="submit" class="modal-confirm" style="width:100%">Yes, Delete</button>
             </form>
         </div>
     </div>
 </div>
-
-<!-- ── Bottom nav ── -->
-<nav class="bottombar">
-    <a href="dashboard.php" class="nav-item active">
-        <span class="icon">🏠</span><span>Home</span>
-    </a>
-    <a href="courses.php" class="nav-item">
-        <span class="icon">📚</span><span>Courses</span>
-    </a>
-    <a href="search.php" class="nav-item">
-        <span class="icon">🔍</span><span>Search</span>
-    </a>
-    <a href="submit_review.php" class="nav-item">
-        <span class="icon">✏️</span><span>Review</span>
-    </a>
-    <a href="logout.php" class="nav-item">
-        <span class="icon">🚪</span><span>Logout</span>
-    </a>
-</nav>
 
 <script>
     function openDelete(id, code) {
@@ -546,11 +426,9 @@ $pendingCount   = $totalReviews - $approvedCount;
     function closeDelete() {
         document.getElementById('deleteModal').classList.remove('open');
     }
-    // Close on backdrop click
     document.getElementById('deleteModal').addEventListener('click', function(e) {
         if (e.target === this) closeDelete();
     });
 </script>
 
-</body>
-</html>
+<?php navbarFooter('student', 'home'); ?>

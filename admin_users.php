@@ -6,6 +6,7 @@
 // ============================================================
 require_once 'db.php';
 requireAdmin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -34,7 +35,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($password !== $confirm)               $errors[] = 'Passwords do not match.';
 
         if (empty($errors)) {
-            // Check duplicates
             $chk = $mysqli->prepare("SELECT id FROM users WHERE email = ? OR student_id = ?");
             $chk->bind_param('ss', $email, $sid);
             $chk->execute();
@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'demote') {
         $id = (int)($_POST['uid'] ?? 0);
         if ($id === $currentId) {
-            $_SESSION['flash'] = '⚠️ You cannot demote yourself.';
+            $_SESSION['flash'] = 'warn:You cannot demote yourself.';
         } elseif ($id > 0) {
             $stmt = $mysqli->prepare("UPDATE users SET role = 'student' WHERE id = ? AND role = 'admin'");
             $stmt->bind_param('i', $id);
@@ -113,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'delete') {
         $id = (int)($_POST['uid'] ?? 0);
         if ($id === $currentId) {
-            $_SESSION['flash'] = '⚠️ You cannot delete your own account.';
+            $_SESSION['flash'] = 'warn:You cannot delete your own account.';
         } elseif ($id > 0) {
             $stmt = $mysqli->prepare("DELETE FROM users WHERE id = ? AND role = 'admin'");
             $stmt->bind_param('i', $id);
@@ -155,159 +155,69 @@ if ($sq !== '') {
 }
 
 $csrf = csrfToken();
+
+navbarHeader('Admin Accounts', '');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Accounts — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand: #4F46E5; --brand-dark: #3730A3; --brand-soft: #EEF2FF;
-            --danger: #EF4444; --danger-soft: #FEF2F2;
-            --success: #22C55E; --success-soft: #F0FDF4;
-            --warning: #EAB308; --warning-soft: #FEFCE8;
-            --purple: #7C3AED; --purple-soft: #F5F3FF;
-            --bg: #F1F5F9; --card: #FFFFFF; --text: #1E293B;
-            --muted: #64748B; --border: #E2E8F0;
-            --radius: 14px; --shadow: 0 2px 12px rgba(0,0,0,.06);
-        }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+<style>
+    /* ── Section title ── */
+    .section-title { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--fr-muted); margin: 20px 0 10px; display: flex; align-items: center; gap: 6px; }
+    .section-title::after { content: ''; flex: 1; height: 1px; background: var(--fr-border); }
 
-        /* ── Topbar ── */
-        .topbar { background: var(--brand); padding: 0 16px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 16px rgba(79,70,229,.25); }
-        .topbar-left { display: flex; align-items: center; gap: 10px; }
-        .topbar-logo { font-size: 1rem; font-weight: 800; color: #fff; }
-        .topbar-logo span { opacity: .7; font-weight: 400; }
-        .admin-chip { background: rgba(255,255,255,.18); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
-        .logout-btn { background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 0.76rem; font-weight: 700; text-decoration: none; cursor: pointer; }
-        .logout-btn:hover { background: rgba(255,255,255,.28); }
+    /* ── Admin cards ── */
+    .admin-list { display: flex; flex-direction: column; gap: 10px; }
+    .admin-card { background: var(--fr-card); border-radius: var(--fr-radius); box-shadow: var(--fr-shadow); padding: 14px 16px; display: flex; align-items: center; gap: 13px; }
+    .a-avatar { width: 44px; height: 44px; border-radius: 50%; background: #7C3AED; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+    .a-avatar.you { background: var(--fr-brand); }
+    .a-info { flex: 1; min-width: 0; }
+    .a-name { font-size: 0.9rem; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+    .you-badge { background: var(--fr-brand-soft); color: var(--fr-brand-dark); font-size: 0.62rem; font-weight: 700; padding: 2px 7px; border-radius: 20px; }
+    .a-meta { font-size: 0.73rem; color: var(--fr-muted); margin-top: 3px; }
+    .a-id { font-family: monospace; font-size: 0.72rem; background: #F5F3FF; color: #7C3AED; padding: 2px 7px; border-radius: 5px; font-weight: 700; }
+    .a-actions { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
 
-        /* ── Layout ── */
-        .container { max-width: 680px; margin: 0 auto; padding: 16px 14px; }
-        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 4px; }
-        .page-sub { font-size: 0.8rem; color: var(--muted); margin-bottom: 16px; }
+    /* ── Inline password change ── */
+    .pw-form { background: #F8FAFC; border: 1.5px solid var(--fr-border); border-radius: 10px; padding: 12px 14px; margin-top: 10px; display: none; }
+    .pw-form.open { display: block; }
+    .pw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pw-actions { display: flex; gap: 7px; margin-top: 10px; }
 
-        /* ── Flash ── */
-        .flash { border-radius: 10px; padding: 11px 14px; font-size: 0.84rem; margin-bottom: 14px; font-weight: 600; border-left: 4px solid; }
-        .flash-success { background: var(--success-soft); border-color: var(--success); color: #166534; }
-        .flash-warning { background: var(--warning-soft); border-color: var(--warning); color: #92400E; }
+    /* ── Promote section ── */
+    .student-result { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--fr-border); }
+    .student-result:last-child { border-bottom: none; }
+    .sr-info { flex: 1; }
+    .sr-name { font-size: 0.85rem; font-weight: 700; }
+    .sr-meta { font-size: 0.72rem; color: var(--fr-muted); margin-top: 2px; }
+    .btn-promote { padding: 6px 12px; background: #F5F3FF; color: #7C3AED; border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .btn-promote:hover { background: #EDE9FE; }
+    .btn-demote { background: var(--fr-warning-soft); color: #92400E; }
+    .btn-demote:hover { background: #FDE68A; }
+    .no-results { font-size: 0.83rem; color: var(--fr-muted); padding: 12px 0; text-align: center; }
 
-        /* ── Section title ── */
-        .section-title { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 10px; display: flex; align-items: center; gap: 6px; }
-        .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .errors { background: var(--fr-danger-soft); border-left: 4px solid var(--fr-danger); border-radius: 10px; padding: 10px 13px; margin-bottom: 14px; font-size: 0.82rem; color: #991B1B; }
+    .errors ul { padding-left: 16px; margin-top: 3px; }
 
-        /* ── Cards ── */
-        .form-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 16px; margin-bottom: 14px; }
-        .form-card-title { font-size: 0.9rem; font-weight: 800; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 7px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group-full { grid-column: 1 / -1; }
+    .input-hint { font-size: 0.7rem; color: var(--fr-muted); margin-top: 2px; }
 
-        /* ── Form elements ── */
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 0; }
-        .form-group.full { grid-column: 1 / -1; }
-        label { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-        input[type=text], input[type=email], input[type=password] {
-            padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px;
-            font-size: 0.9rem; color: var(--text); background: #FAFAFA;
-            outline: none; font-family: inherit; transition: border-color .2s, box-shadow .2s; width: 100%;
-        }
-        input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); background: #fff; }
-        .input-hint { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+    @media (max-width: 480px) {
+        .form-grid, .pw-grid { grid-template-columns: 1fr; }
+        .a-actions { flex-direction: column; align-items: flex-end; }
+    }
+</style>
 
-        .errors { background: var(--danger-soft); border-left: 4px solid var(--danger); border-radius: 10px; padding: 10px 13px; margin-bottom: 14px; font-size: 0.82rem; color: #991B1B; }
-        .errors ul { padding-left: 16px; margin-top: 3px; }
+<div class="fr-container" style="max-width:680px;">
+    <div class="fr-page-title">🔐 Admin Accounts</div>
+    <div class="fr-page-sub">Create and manage administrator accounts for FacultyReview.</div>
 
-        .form-actions { display: flex; gap: 8px; margin-top: 14px; }
-        .btn { padding: 10px 18px; border-radius: 9px; font-size: 0.84rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; transition: opacity .15s; }
-        .btn-primary { background: var(--brand); color: #fff; }
-        .btn-primary:hover { background: var(--brand-dark); }
-        .btn-ghost { background: var(--bg); color: var(--muted); }
-        .btn-ghost:hover { background: var(--border); color: var(--text); }
-
-        /* ── Admin cards ── */
-        .admin-list { display: flex; flex-direction: column; gap: 10px; }
-        .admin-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: flex; align-items: center; gap: 13px; }
-        .a-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--purple); display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 800; color: #fff; flex-shrink: 0; }
-        .a-avatar.you { background: var(--brand); }
-        .a-info { flex: 1; min-width: 0; }
-        .a-name { font-size: 0.9rem; font-weight: 800; display: flex; align-items: center; gap: 6px; }
-        .you-badge { background: var(--brand-soft); color: var(--brand-dark); font-size: 0.62rem; font-weight: 700; padding: 2px 7px; border-radius: 20px; }
-        .a-meta { font-size: 0.73rem; color: var(--muted); margin-top: 3px; }
-        .a-id { font-family: monospace; font-size: 0.72rem; background: var(--purple-soft); color: var(--purple); padding: 2px 7px; border-radius: 5px; font-weight: 700; }
-        .a-actions { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
-
-        .btn-sm { padding: 6px 11px; border-radius: 7px; font-size: 0.72rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
-        .btn-pw   { background: var(--brand-soft); color: var(--brand-dark); }
-        .btn-pw:hover { background: #C7D2FE; }
-        .btn-demote { background: var(--warning-soft); color: #92400E; }
-        .btn-demote:hover { background: #FDE68A; }
-        .btn-del-sm { background: var(--danger-soft); color: var(--danger); }
-        .btn-del-sm:hover { background: #FEE2E2; }
-        .btn-disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
-
-        /* ── Inline password change ── */
-        .pw-form { background: #F8FAFC; border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 10px; display: none; }
-        .pw-form.open { display: block; }
-        .pw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .pw-actions { display: flex; gap: 7px; margin-top: 10px; }
-        .btn-save-pw { padding: 8px 14px; background: var(--brand); color: #fff; border: none; border-radius: 8px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; }
-        .btn-cancel-pw { padding: 8px 12px; background: var(--bg); color: var(--muted); border: none; border-radius: 8px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; }
-
-        /* ── Promote section ── */
-        .search-row { display: flex; gap: 8px; }
-        .search-input { flex: 1; padding: 10px 13px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 0.88rem; outline: none; font-family: inherit; color: var(--text); background: #FAFAFA; transition: border-color .2s; }
-        .search-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
-        .search-btn { padding: 10px 16px; background: var(--brand); color: #fff; border: none; border-radius: 10px; font-size: 0.85rem; font-weight: 700; cursor: pointer; font-family: inherit; }
-
-        .student-result { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-        .student-result:last-child { border-bottom: none; }
-        .sr-info { flex: 1; }
-        .sr-name { font-size: 0.85rem; font-weight: 700; }
-        .sr-meta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
-        .btn-promote { padding: 6px 12px; background: var(--purple-soft); color: var(--purple); border: none; border-radius: 7px; font-size: 0.73rem; font-weight: 700; cursor: pointer; font-family: inherit; }
-        .btn-promote:hover { background: #EDE9FE; }
-        .no-results { font-size: 0.83rem; color: var(--muted); padding: 12px 0; text-align: center; }
-
-        /* ── Bottom nav ── */
-        .bottombar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); box-shadow: 0 -2px 12px rgba(0,0,0,.05); }
-        .nav-item { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 0.6rem; font-weight: 600; flex: 1; padding: 4px 0; }
-        .nav-item .icon { font-size: 1.15rem; line-height: 1; }
-        .nav-item.active { color: var(--brand); }
-
-        @media (max-width: 480px) {
-            .form-grid, .pw-grid { grid-template-columns: 1fr; }
-            .a-actions { flex-direction: column; align-items: flex-end; }
-        }
-    </style>
-</head>
-<body>
-
-<header class="topbar">
-    <div class="topbar-left">
-        <div class="topbar-logo">Faculty<span>Review</span></div>
-        <span class="admin-chip">Admin</span>
-    </div>
-    <a href="logout.php" class="logout-btn">Logout</a>
-</header>
-
-<div class="container">
-    <div class="page-title">🔐 Admin Accounts</div>
-    <div class="page-sub">Create and manage administrator accounts for FacultyReview.</div>
-
-    <?php if ($flash): ?>
-        <div class="flash <?= str_contains($flash, '⚠️') || str_contains($flash, '↩️') ? 'flash-warning' : 'flash-success' ?>">
-            <?= e($flash) ?>
-        </div>
-    <?php endif; ?>
+    <?php renderFlash($flash); ?>
 
     <?php if (!empty($errors)): ?>
         <div class="errors"><ul><?php foreach ($errors as $err): ?><li><?= e($err) ?></li><?php endforeach; ?></ul></div>
     <?php endif; ?>
 
     <!-- ── Current admins ── -->
-    <div class="section-title">Current Admins <span style="background:var(--purple-soft);color:var(--purple);font-size:0.7rem;padding:2px 8px;border-radius:20px;font-weight:800;"><?= count($admins) ?></span></div>
+    <div class="section-title">Current Admins <span style="background:#F5F3FF;color:#7C3AED;font-size:0.7rem;padding:2px 8px;border-radius:20px;font-weight:800;"><?= count($admins) ?></span></div>
 
     <div class="admin-list">
         <?php foreach ($admins as $a):
@@ -340,40 +250,40 @@ $csrf = csrfToken();
                         <input type="hidden" name="action" value="change_password">
                         <input type="hidden" name="uid" value="<?= (int)$a['id'] ?>">
                         <div class="pw-grid">
-                            <div class="form-group">
-                                <label>New Password</label>
-                                <input type="password" name="password" placeholder="Min 6 characters" autocomplete="new-password">
+                            <div class="fr-form-group">
+                                <label class="fr-label">New Password</label>
+                                <input type="password" class="fr-input" name="password" placeholder="Min 6 characters" autocomplete="new-password">
                             </div>
-                            <div class="form-group">
-                                <label>Confirm Password</label>
-                                <input type="password" name="confirm" placeholder="Repeat password" autocomplete="new-password">
+                            <div class="fr-form-group">
+                                <label class="fr-label">Confirm Password</label>
+                                <input type="password" class="fr-input" name="confirm" placeholder="Repeat password" autocomplete="new-password">
                             </div>
                         </div>
                         <div class="pw-actions">
-                            <button type="submit" class="btn-save-pw">💾 Update Password</button>
-                            <button type="button" class="btn-cancel-pw" onclick="togglePw(<?= (int)$a['id'] ?>)">Cancel</button>
+                            <button type="submit" class="fr-btn fr-btn-primary fr-btn-sm">💾 Update Password</button>
+                            <button type="button" class="fr-btn fr-btn-ghost fr-btn-sm" onclick="togglePw(<?= (int)$a['id'] ?>)">Cancel</button>
                         </div>
                     </form>
                 </div>
             </div>
             <div class="a-actions">
-                <button type="button" class="btn-sm btn-pw" onclick="togglePw(<?= (int)$a['id'] ?>)">🔑 Password</button>
+                <button type="button" class="fr-btn fr-btn-ghost fr-btn-sm" onclick="togglePw(<?= (int)$a['id'] ?>)">🔑 Password</button>
                 <?php if (!$isYou): ?>
                     <form method="POST" onsubmit="return confirm('Demote <?= e(addslashes($a['name'])) ?> to Student?');" style="display:contents;">
                         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
                         <input type="hidden" name="action" value="demote">
                         <input type="hidden" name="uid" value="<?= (int)$a['id'] ?>">
-                        <button type="submit" class="btn-sm btn-demote">↩️ Demote</button>
+                        <button type="submit" class="fr-btn fr-btn-sm btn-demote">↩️ Demote</button>
                     </form>
                     <form method="POST" onsubmit="return confirm('Permanently delete admin account for <?= e(addslashes($a['name'])) ?>?');" style="display:contents;">
                         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="uid" value="<?= (int)$a['id'] ?>">
-                        <button type="submit" class="btn-sm btn-del-sm">🗑️ Delete</button>
+                        <button type="submit" class="fr-btn fr-btn-danger fr-btn-sm">🗑️ Delete</button>
                     </form>
                 <?php else: ?>
-                    <span class="btn-sm btn-demote btn-disabled" title="Cannot demote yourself">↩️ Demote</span>
-                    <span class="btn-sm btn-del-sm btn-disabled" title="Cannot delete yourself">🗑️ Delete</span>
+                    <span class="fr-btn fr-btn-sm btn-demote" style="opacity:.35;cursor:not-allowed;" title="Cannot demote yourself">↩️ Demote</span>
+                    <span class="fr-btn fr-btn-danger fr-btn-sm" style="opacity:.35;cursor:not-allowed;" title="Cannot delete yourself">🗑️ Delete</span>
                 <?php endif; ?>
             </div>
         </div>
@@ -383,36 +293,36 @@ $csrf = csrfToken();
     <!-- ── Add new admin ── -->
     <div class="section-title">Create New Admin Account</div>
 
-    <div class="form-card">
-        <div class="form-card-title">🛡️ New Admin</div>
+    <div class="fr-card" style="padding:18px 16px;">
+        <div style="font-size:0.9rem;font-weight:800;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--fr-border);">🛡️ New Admin</div>
         <form method="POST">
             <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
             <input type="hidden" name="action" value="add">
             <div class="form-grid">
-                <div class="form-group full">
-                    <label for="name">Full Name</label>
-                    <input type="text" id="name" name="name" placeholder="e.g. Md. Karim Hossain" maxlength="120" required>
+                <div class="fr-form-group form-group-full">
+                    <label class="fr-label" for="name">Full Name</label>
+                    <input type="text" class="fr-input" id="name" name="name" placeholder="e.g. Md. Karim Hossain" maxlength="120" required>
                 </div>
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" placeholder="admin@university.edu" required>
+                <div class="fr-form-group">
+                    <label class="fr-label" for="email">Email</label>
+                    <input type="email" class="fr-input" id="email" name="email" placeholder="admin@university.edu" required>
                 </div>
-                <div class="form-group">
-                    <label for="student_id">Admin ID</label>
-                    <input type="text" id="student_id" name="student_id" placeholder="e.g. ADMIN001" maxlength="20" required>
+                <div class="fr-form-group">
+                    <label class="fr-label" for="student_id">Admin ID</label>
+                    <input type="text" class="fr-input" id="student_id" name="student_id" placeholder="e.g. ADMIN001" maxlength="20" required>
                     <span class="input-hint">Used as login identifier</span>
                 </div>
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="Min 6 characters" autocomplete="new-password" required>
+                <div class="fr-form-group">
+                    <label class="fr-label" for="password">Password</label>
+                    <input type="password" class="fr-input" id="password" name="password" placeholder="Min 6 characters" autocomplete="new-password" required>
                 </div>
-                <div class="form-group">
-                    <label for="confirm">Confirm Password</label>
-                    <input type="password" id="confirm" name="confirm" placeholder="Repeat password" autocomplete="new-password" required>
+                <div class="fr-form-group">
+                    <label class="fr-label" for="confirm">Confirm Password</label>
+                    <input type="password" class="fr-input" id="confirm" name="confirm" placeholder="Repeat password" autocomplete="new-password" required>
                 </div>
             </div>
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">🛡️ Create Admin</button>
+            <div style="margin-top:14px;">
+                <button type="submit" class="fr-btn fr-btn-primary">🛡️ Create Admin</button>
             </div>
         </form>
     </div>
@@ -420,13 +330,13 @@ $csrf = csrfToken();
     <!-- ── Promote existing student ── -->
     <div class="section-title">Promote a Student to Admin</div>
 
-    <div class="form-card">
-        <div class="form-card-title">🎓 → 🛡️ Promote Student</div>
-        <form method="GET" class="search-row" style="margin-bottom: <?= !empty($students) || $sq ? '14px' : '0' ?>;">
-            <input type="text" name="sq" class="search-input" placeholder="Search student by name, ID, or email…" value="<?= e($sq) ?>" autocomplete="off">
-            <button type="submit" class="search-btn">🔍</button>
+    <div class="fr-card" style="padding:18px 16px;">
+        <div style="font-size:0.9rem;font-weight:800;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--fr-border);">🎓 → 🛡️ Promote Student</div>
+        <form method="GET" style="display:flex;gap:8px;margin-bottom:<?= !empty($students) || $sq ? '14px' : '0' ?>;">
+            <input type="text" name="sq" class="fr-input" placeholder="Search student by name, ID, or email…" value="<?= e($sq) ?>" autocomplete="off">
+            <button type="submit" class="fr-btn fr-btn-primary">🔍</button>
             <?php if ($sq): ?>
-                <a href="admin_users.php" style="padding:10px 13px;background:var(--bg);color:var(--muted);border:none;border-radius:10px;font-size:0.85rem;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;">✕</a>
+                <a href="admin_users.php" class="fr-btn fr-btn-ghost">✕</a>
             <?php endif; ?>
         </form>
 
@@ -451,20 +361,12 @@ $csrf = csrfToken();
                 </div>
                 <?php endforeach; ?>
             <?php endif; ?>
-        <?php elseif (!$sq): ?>
-            <p style="font-size:0.8rem;color:var(--muted);">Search for an existing student account and grant them admin access without creating a new account.</p>
+        <?php else: ?>
+            <p style="font-size:0.8rem;color:var(--fr-muted);">Search for an existing student account and grant them admin access without creating a new account.</p>
         <?php endif; ?>
     </div>
 
 </div>
-
-<nav class="bottombar">
-    <a href="admin.php"          class="nav-item"><span class="icon">🏠</span><span>Dashboard</span></a>
-    <a href="admin_reviews.php"  class="nav-item"><span class="icon">📝</span><span>Reviews</span></a>
-    <a href="admin_courses.php"  class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="admin_teachers.php" class="nav-item"><span class="icon">👨‍🏫</span><span>Teachers</span></a>
-    <a href="admin_users.php"    class="nav-item active"><span class="icon">🔐</span><span>Admins</span></a>
-</nav>
 
 <script>
 function togglePw(id) {
@@ -472,5 +374,5 @@ function togglePw(id) {
     el.classList.toggle('open');
 }
 </script>
-</body>
-</html>
+
+<?php navbarFooter('admin', ''); ?>

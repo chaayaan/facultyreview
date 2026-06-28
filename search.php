@@ -6,6 +6,7 @@
 // ============================================================
 require_once 'db.php';
 requireLogin();
+require_once 'navbar.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -56,137 +57,79 @@ if ($query !== '') {
 
 $hasSearched = ($query !== '');
 $hasResults  = (!empty($courses) || !empty($teachers));
+
+navbarHeader('Search', 'search');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search — FacultyReview</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-            --brand:      #4F46E5;
-            --brand-dark: #3730A3;
-            --brand-soft: #EEF2FF;
-            --warning:    #EAB308;
-            --bg:         #F1F5F9;
-            --card:       #FFFFFF;
-            --text:       #1E293B;
-            --muted:      #64748B;
-            --border:     #E2E8F0;
-            --radius:     14px;
-            --shadow:     0 2px 12px rgba(0,0,0,.06);
-        }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg); color: var(--text);
-            min-height: 100vh; padding-bottom: 80px;
-        }
+<style>
+    .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 12px; }
 
-        .topbar {
-            position: sticky; top: 0; z-index: 50;
-            background: var(--card); border-bottom: 1px solid var(--border);
-            padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
-        }
-        .topbar-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-        .topbar-icon  { width:32px; height:32px; background:var(--brand); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; }
-        .topbar-name  { font-size:1.05rem; font-weight:700; color:var(--text); }
-        .topbar-name span { color: var(--brand); }
-        .avatar { width:34px; height:34px; border-radius:50%; background:var(--brand-soft); color:var(--brand-dark); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; text-decoration:none; }
+    /* Search bar */
+    .search-form { display: flex; gap: 8px; margin-bottom: 18px; }
+    .search-input-wrap { flex: 1; position: relative; }
+    .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1rem; }
+    .search-input {
+        width: 100%; padding: 13px 14px 13px 40px; border: 1.5px solid var(--border); border-radius: 12px;
+        font-size: 0.95rem; background: var(--card); color: var(--text); outline: none;
+        transition: border-color .2s, box-shadow .2s;
+    }
+    .search-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    .search-btn {
+        background: var(--brand); color: #fff; border: none; border-radius: 12px;
+        padding: 0 18px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background .15s;
+    }
+    .search-btn:hover { background: var(--brand-dark); }
 
-        .container { max-width: 600px; margin: 0 auto; padding: 16px 14px; }
+    .results-summary { font-size: 0.82rem; color: var(--muted); margin-bottom: 16px; }
 
-        .page-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 12px; }
+    .section-title { font-size: 0.95rem; font-weight: 700; margin: 18px 0 10px; display: flex; align-items: center; gap: 6px; }
+    .section-title:first-of-type { margin-top: 0; }
+    .count-badge { background: var(--brand-soft); color: var(--brand-dark); font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
 
-        /* Search bar */
-        .search-form { display: flex; gap: 8px; margin-bottom: 18px; }
-        .search-input-wrap { flex: 1; position: relative; }
-        .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1rem; }
-        .search-input {
-            width: 100%; padding: 13px 14px 13px 40px; border: 1.5px solid var(--border); border-radius: 12px;
-            font-size: 0.95rem; background: var(--card); color: var(--text); outline: none;
-            transition: border-color .2s, box-shadow .2s;
-        }
-        .search-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
-        .search-btn {
-            background: var(--brand); color: #fff; border: none; border-radius: 12px;
-            padding: 0 18px; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background .15s;
-        }
-        .search-btn:hover { background: var(--brand-dark); }
+    /* Course card */
+    .course-card {
+        background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
+        margin-bottom: 10px; text-decoration: none; color: var(--text); display: block;
+        transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
+    }
+    .course-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
+    .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .course-left { flex: 1; min-width: 0; }
+    .course-code { font-size: 0.68rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+    .course-name { font-size: 0.95rem; font-weight: 700; }
+    .course-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
+    .course-right { text-align: right; flex-shrink: 0; }
+    .stars        { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; display: block; }
+    .avg-num      { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+    .no-reviews   { font-size: 0.72rem; color: var(--muted); }
+    .mini-ratings { display: flex; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .mini-r { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; }
+    .mini-r-label { color: var(--muted); font-weight: 600; }
+    .mini-r-stars { color: var(--warning); font-size: 0.7rem; }
 
-        .results-summary { font-size: 0.82rem; color: var(--muted); margin-bottom: 16px; }
+    /* Teacher card */
+    .teacher-card {
+        background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
+        margin-bottom: 10px; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: 12px;
+        transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
+    }
+    .teacher-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
+    .teacher-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 0.85rem; color: #fff; }
+    .teacher-info { flex: 1; min-width: 0; }
+    .teacher-name { font-size: 0.92rem; font-weight: 700; }
+    .teacher-designation { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+    .teacher-right { text-align: right; flex-shrink: 0; }
 
-        .section-title { font-size: 0.95rem; font-weight: 700; margin: 18px 0 10px; display: flex; align-items: center; gap: 6px; }
-        .section-title:first-of-type { margin-top: 0; }
-        .count-badge { background: var(--brand-soft); color: var(--brand-dark); font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
+    .empty-emoji { font-size: 2.2rem; margin-bottom: 10px; }
+    .empty-text { font-size: 0.88rem; color: var(--muted); font-weight: 600; }
+    .empty-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 
-        /* Course card */
-        .course-card {
-            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
-            margin-bottom: 10px; text-decoration: none; color: var(--text); display: block;
-            transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
-        }
-        .course-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
-        .course-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-        .course-left { flex: 1; min-width: 0; }
-        .course-code { font-size: 0.68rem; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
-        .course-name { font-size: 0.95rem; font-weight: 700; }
-        .course-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
-        .course-right { text-align: right; flex-shrink: 0; }
-        .stars        { color: var(--warning); font-size: 0.9rem; letter-spacing: 1px; display: block; }
-        .avg-num      { font-size: 0.75rem; font-weight: 700; color: var(--text); }
-        .no-reviews   { font-size: 0.72rem; color: var(--muted); }
-        .mini-ratings { display: flex; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-        .mini-r { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; }
-        .mini-r-label { color: var(--muted); font-weight: 600; }
-        .mini-r-stars { color: var(--warning); font-size: 0.7rem; }
+    .prompt-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+    .prompt-emoji { font-size: 2.4rem; margin-bottom: 10px; }
+    .prompt-text { font-size: 0.88rem; }
+</style>
 
-        /* Teacher card */
-        .teacher-card {
-            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px;
-            margin-bottom: 10px; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: 12px;
-            transition: box-shadow .15s, transform .1s; border-left: 4px solid transparent;
-        }
-        .teacher-card:hover { box-shadow: 0 6px 24px rgba(79,70,229,.12); transform: translateY(-1px); border-left-color: var(--brand); }
-        .teacher-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 0.85rem; color: #fff; }
-        .teacher-info { flex: 1; min-width: 0; }
-        .teacher-name { font-size: 0.92rem; font-weight: 700; }
-        .teacher-designation { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
-        .teacher-right { text-align: right; flex-shrink: 0; }
-
-        .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
-        .empty-emoji { font-size: 2.2rem; margin-bottom: 10px; }
-        .empty-text { font-size: 0.88rem; color: var(--muted); font-weight: 600; }
-        .empty-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
-
-        .prompt-state { text-align: center; padding: 40px 20px; color: var(--muted); }
-        .prompt-emoji { font-size: 2.4rem; margin-bottom: 10px; }
-        .prompt-text { font-size: 0.88rem; }
-
-        .bottombar {
-            position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-            background: var(--card); border-top: 1px solid var(--border);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 8px 0 max(8px, env(safe-area-inset-bottom));
-            box-shadow: 0 -2px 12px rgba(0,0,0,.05);
-        }
-        .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; text-decoration:none; color:var(--muted); font-size:0.62rem; font-weight:600; flex:1; padding:4px 0; }
-        .nav-item .icon { font-size:1.2rem; line-height:1; }
-        .nav-item.active { color: var(--brand); }
-    </style>
-</head>
-<body>
-
-<header class="topbar">
-    <a href="dashboard.php" class="topbar-brand">
-        <div class="topbar-icon">🎓</div>
-        <span class="topbar-name">Faculty<span>Review</span></span>
-    </a>
-    <a href="dashboard.php" class="avatar"><?= e(strtoupper(substr($_SESSION['user_name'], 0, 1))) ?></a>
-</header>
-
-<div class="container">
+<div class="fr-container">
 
     <div class="page-title">Search</div>
 
@@ -282,13 +225,4 @@ $hasResults  = (!empty($courses) || !empty($teachers));
 
 </div>
 
-<nav class="bottombar">
-    <a href="dashboard.php" class="nav-item"><span class="icon">🏠</span><span>Home</span></a>
-    <a href="courses.php"   class="nav-item"><span class="icon">📚</span><span>Courses</span></a>
-    <a href="search.php"    class="nav-item active"><span class="icon">🔍</span><span>Search</span></a>
-    <a href="submit_review.php" class="nav-item"><span class="icon">✏️</span><span>Review</span></a>
-    <a href="logout.php"    class="nav-item"><span class="icon">🚪</span><span>Logout</span></a>
-</nav>
-
-</body>
-</html>
+<?php navbarFooter('student', 'search'); ?>
