@@ -2,6 +2,8 @@
 // ============================================================
 //  FacultyReview — admin_reviews.php
 //  Approve / reject / delete / flag reviews.
+//  UI now matches the Facebook-style post cards used across the app
+//  (course_detail.php / teacher_detail.php / dashboard.php).
 // ============================================================
 require_once 'db.php';
 requireAdmin();
@@ -122,57 +124,123 @@ navbarHeader('Review Moderation', 'reviews');
     /* ── Filter tabs ── */
     .filter-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 16px; scrollbar-width: none; }
     .filter-tabs::-webkit-scrollbar { display: none; }
-    .tab-link { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-decoration: none; white-space: nowrap; background: var(--card, #fff); color: var(--muted); border: 1.5px solid var(--border, #E2E8F0); transition: all .15s; }
-    .tab-link:hover { border-color: var(--brand, #4F46E5); color: var(--brand, #4F46E5); }
-    .tab-link.active { background: var(--brand, #4F46E5); color: #fff; border-color: var(--brand, #4F46E5); }
+    .tab-link { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-decoration: none; white-space: nowrap; background: var(--card); color: var(--muted); border: 1.5px solid var(--border); transition: all .15s; }
+    .tab-link:hover { border-color: var(--brand); color: var(--brand); }
+    .tab-link.active { background: var(--brand); color: #fff; border-color: var(--brand); }
     .tab-count { background: rgba(255,255,255,.25); border-radius: 20px; padding: 1px 6px; font-size: 0.7rem; }
-    .tab-link:not(.active) .tab-count { background: var(--border, #E2E8F0); color: var(--muted); }
+    .tab-link:not(.active) .tab-count { background: var(--border); color: var(--muted); }
 
-    /* ── Review card ── */
-    .review-card { background: var(--card, #fff); border-radius: var(--radius, 14px); box-shadow: 0 2px 12px rgba(0,0,0,.06); margin-bottom: 12px; overflow: hidden; }
-    .rcard-header { padding: 12px 14px; border-bottom: 1px solid var(--border, #E2E8F0); display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-    .rcard-course  { font-size: 0.95rem; font-weight: 800; }
-    .rcard-teacher { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
-    .rcard-badges  { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
-    .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 20px; font-size: 0.68rem; font-weight: 700; }
+    /* ── Facebook-style post card (matches dashboard.php / course_detail.php) ── */
+    .post-card {
+        background: var(--card);
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,.10);
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
+
+    /* Post header */
+    .post-header {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 14px 0;
+    }
+    .post-avatar {
+        width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+        background: var(--brand);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.85rem; font-weight: 700; color: #fff;
+    }
+    .post-meta { flex: 1; min-width: 0; }
+    .post-name {
+        font-size: 0.92rem; font-weight: 700; color: var(--text); line-height: 1.3;
+    }
+    .post-name a { color: var(--brand); text-decoration: none; }
+    .post-name a:hover { text-decoration: underline; }
+    .post-sub {
+        font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+        display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .post-sub .dot { color: var(--border); }
+    .post-sub strong { color: var(--text); }
+
+    .star-badge {
+        display: flex; align-items: center; gap: 3px;
+        background: #fff8e1; border: 1px solid #ffe082;
+        border-radius: 20px; padding: 4px 10px; flex-shrink: 0;
+    }
+    .star-badge .sb-star { color: #f5a623; font-size: 0.88rem; }
+    .star-badge .sb-num  { font-size: 0.82rem; font-weight: 700; color: #5d4037; }
+    .star-badge.low { background: #fff0f0; border-color: #ffcdd2; }
+    .star-badge.low .sb-star,
+    .star-badge.low .sb-num { color: #b71c1c; }
+
+    /* Status badges row (admin moderation state) */
+    .status-row { padding: 8px 14px 0; display: flex; gap: 5px; flex-wrap: wrap; }
+    .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 10px; border-radius: 20px; font-size: 0.68rem; font-weight: 700; }
     .badge-pending  { background: #FEFCE8; color: #A16207; }
     .badge-approved { background: #F0FDF4; color: #166534; }
     .badge-flagged  { background: #FEF2F2; color: #991B1B; }
 
-    .rcard-meta { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.74rem; color: var(--muted); border-bottom: 1px solid var(--border, #E2E8F0); }
-    .rcard-meta span { display: flex; align-items: center; gap: 4px; }
-    .rcard-meta strong { color: var(--text); }
+    /* Post body: comment + rating chips */
+    .post-body { padding: 10px 14px 12px; }
+    .post-comment {
+        font-size: 1.5rem; line-height: 1.6; color: var(--text);
+        margin-bottom: 12px;
+    }
+    .post-comment.empty { color: var(--muted); font-style: italic; font-size: 0.9rem; }
 
-    .rcard-ratings { padding: 10px 14px; display: grid; grid-template-columns: repeat(2,1fr); gap: 6px 16px; border-bottom: 1px solid var(--border, #E2E8F0); }
-    .rating-row    { display: flex; justify-content: space-between; font-size: 0.78rem; }
-    .rating-label  { color: var(--muted); font-weight: 600; }
-    .stars         { color: #EAB308; }
+    .rating-strip { display: flex; gap: 5px; }
+    .r-chip {
+        display: flex; flex-direction: column; gap: 2px; flex: 1;
+        background: var(--bg); border-radius: 6px; padding: 6px 8px;
+    }
+    .r-chip .rl { color: var(--muted); font-weight: 700; font-size: 0.60rem; }
+    .r-chip .rs { color: var(--warning); font-size: 0.62rem; letter-spacing: 0.5px; }
 
-    .rcard-comment { padding: 10px 14px; font-size: 0.85rem; line-height: 1.55; color: var(--text); border-bottom: 1px solid var(--border, #E2E8F0); }
-    .rcard-comment.empty { color: var(--muted); font-style: italic; }
+    /* Student/session meta strip */
+    .post-extra-meta {
+        display: flex; flex-wrap: wrap; gap: 10px;
+        padding: 9px 14px; font-size: 0.74rem; color: var(--muted);
+        border-top: 1px solid var(--border); background: var(--bg);
+    }
+    .post-extra-meta span { display: flex; align-items: center; gap: 4px; }
+    .post-extra-meta strong { color: var(--text); }
 
-    .rcard-actions { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-    .btn-action { display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: 8px; font-size: 0.76rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; text-decoration: none; transition: opacity .15s, transform .1s; }
-    .btn-action:active { transform: scale(.97); }
-    .btn-approve   { background: #F0FDF4; color: #166634; }
-    .btn-approve:hover   { background: #DCFCE7; }
-    .btn-unapprove { background: #FEFCE8; color: #A16207; }
-    .btn-unapprove:hover { background: #FEF08A; }
-    .btn-flag      { background: #FEF2F2; color: #EF4444; }
-    .btn-flag:hover      { background: #FEE2E2; }
-    .btn-unflag    { background: #EEF2FF; color: #3730A3; }
-    .btn-unflag:hover    { background: #E0E7FF; }
-    .btn-delete    { background: #EF4444; color: #fff; margin-left: auto; }
-    .btn-delete:hover    { background: #DC2626; }
+    /* Action buttons row (admin moderation actions) */
+    .post-actions {
+        display: flex; flex-wrap: wrap;
+        border-top: 1px solid var(--border);
+    }
+    .post-actions form { flex: 1; min-width: 84px; display: flex; }
+    .act-btn {
+        flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+        padding: 9px 6px; border: none; background: none;
+        font-size: 0.76rem; font-weight: 700; color: var(--muted);
+        cursor: pointer; transition: background .12s; font-family: inherit;
+        border-left: 1px solid var(--border); white-space: nowrap;
+    }
+    .post-actions form:first-child .act-btn { border-left: none; }
+    .act-btn:hover { background: var(--bg); }
+    .act-btn.act-approve   { color: #166534; }
+    .act-btn.act-approve:hover   { background: #F0FDF4; }
+    .act-btn.act-unapprove { color: #A16207; }
+    .act-btn.act-unapprove:hover { background: #FEFCE8; }
+    .act-btn.act-flag      { color: #EF4444; }
+    .act-btn.act-flag:hover      { background: #FEF2F2; }
+    .act-btn.act-unflag    { color: #3730A3; }
+    .act-btn.act-unflag:hover    { background: #EEF2FF; }
+    .act-btn.act-delete    { color: #fff; background: var(--danger); }
+    .act-btn.act-delete:hover    { background: #DC2626; }
 
-    .empty-state { background: var(--card, #fff); border-radius: var(--radius, 14px); padding: 40px 20px; text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+    .empty-state { background: var(--card); border-radius: var(--radius); padding: 40px 20px; text-align: center; box-shadow: var(--shadow); }
     .empty-emoji { font-size: 2.2rem; margin-bottom: 8px; }
     .empty-text  { font-size: 0.85rem; color: var(--muted); }
 
     .pagination { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
-    .page-btn { padding: 7px 13px; border-radius: 8px; border: 1.5px solid var(--border, #E2E8F0); background: var(--card, #fff); color: var(--text); font-size: 0.8rem; font-weight: 700; text-decoration: none; transition: all .15s; }
-    .page-btn:hover { border-color: var(--brand, #4F46E5); color: var(--brand, #4F46E5); }
-    .page-btn.active { background: var(--brand, #4F46E5); border-color: var(--brand, #4F46E5); color: #fff; }
+    .page-btn { padding: 7px 13px; border-radius: 8px; border: 1.5px solid var(--border); background: var(--card); color: var(--text); font-size: 0.8rem; font-weight: 700; text-decoration: none; transition: all .15s; }
+    .page-btn:hover { border-color: var(--brand); color: var(--brand); }
+    .page-btn.active { background: var(--brand); border-color: var(--brand); color: #fff; }
     .page-btn.disabled { opacity: .4; pointer-events: none; }
 </style>
 
@@ -201,56 +269,104 @@ navbarHeader('Review Moderation', 'reviews');
         </div>
     <?php else: ?>
 
-        <?php foreach ($reviews as $r): ?>
-        <div class="review-card">
-            <div class="rcard-header">
-                <div>
-                    <div class="rcard-course"><?= e($r['course_code']) ?> — <?= e($r['course_name']) ?></div>
-                    <div class="rcard-teacher">👨‍🏫 <?= e($r['teacher_name']) ?></div>
+        <?php foreach ($reviews as $r):
+            $overall = (float)$r['rating_overall'];
+            $isLow   = $overall < 3;
+
+            // Avatar initials from teacher name (same convention as student-facing pages)
+            $initials = '';
+            foreach (explode(' ', $r['teacher_name']) as $part) {
+                $p = preg_replace('/[^A-Za-z]/', '', $part);
+                if ($p !== '') $initials .= strtoupper($p[0]);
+                if (strlen($initials) >= 2) break;
+            }
+        ?>
+        <div class="post-card" data-review-id="<?= (int)$r['id'] ?>">
+
+            <!-- Header: course in one row, teacher + session in the row below -->
+            <div class="post-header">
+                <div class="post-avatar"><?= e($initials ?: '?') ?></div>
+                <div class="post-meta">
+                    <div class="post-name"><?= e($r['course_code']) ?> — <?= e($r['course_name']) ?></div>
+                    <div class="post-sub">
+                        <span>👨‍🏫 <strong><?= e($r['teacher_name']) ?></strong></span>
+                        <span class="dot">·</span>
+                        <span>📅 <?= e($r['session_label']) ?></span>
+                        <span class="dot">·</span>
+                        <span>🕐 <?= timeAgo($r['created_at']) ?></span>
+                    </div>
                 </div>
-                <div class="rcard-badges">
-                    <?php if ($r['is_flagged']): ?><span class="badge badge-flagged">🚩 Flagged</span><?php endif; ?>
-                    <?php if ($r['is_approved']): ?>
-                        <span class="badge badge-approved">✅ Live</span>
-                    <?php else: ?>
-                        <span class="badge badge-pending">⏳ Pending</span>
-                    <?php endif; ?>
+                <div class="star-badge <?= $isLow ? 'low' : '' ?>">
+                    <span class="sb-star">★</span>
+                    <span class="sb-num"><?= number_format($overall, 1) ?></span>
                 </div>
             </div>
-            <div class="rcard-meta">
-                <span>📅 <strong><?= e($r['session_label']) ?></strong></span>
-                <span>🎓 <strong><?= semesterLabel((int)$r['semester_taken']) ?></strong></span>
-                <span>🆔 <strong><?= e($r['student_id']) ?></strong> (<?= e($r['student_name']) ?>)</span>
-                <span>🕐 <?= timeAgo($r['created_at']) ?></span>
-            </div>
-            <div class="rcard-ratings">
-                <div class="rating-row"><span class="rating-label">Overall</span><span class="stars"><?= starDisplay((float)$r['rating_overall']) ?> <?= $r['rating_overall'] ?>/5</span></div>
-                <div class="rating-row"><span class="rating-label">Teaching</span><span class="stars"><?= starDisplay((float)$r['rating_teaching']) ?> <?= $r['rating_teaching'] ?>/5</span></div>
-                <div class="rating-row"><span class="rating-label">Workload</span><span class="stars"><?= starDisplay((float)$r['rating_workload']) ?> <?= $r['rating_workload'] ?>/5</span></div>
-                <div class="rating-row"><span class="rating-label">Grading</span><span class="stars"><?= starDisplay((float)$r['rating_grading']) ?> <?= $r['rating_grading'] ?>/5</span></div>
-            </div>
-            <div class="rcard-comment <?= trim((string)$r['comment']) === '' ? 'empty' : '' ?>">
-                <?= trim((string)$r['comment']) !== '' ? '"' . e($r['comment']) . '"' : 'No comment written.' ?>
-            </div>
-            <div class="rcard-actions">
-                <?php if (!$r['is_approved']): ?>
-                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="btn-action btn-approve">✅ Approve</button></form>
+
+            <!-- Moderation status badges -->
+            <div class="status-row">
+                <?php if ($r['is_flagged']): ?><span class="badge badge-flagged">🚩 Flagged</span><?php endif; ?>
+                <?php if ($r['is_approved']): ?>
+                    <span class="badge badge-approved">✅ Live</span>
                 <?php else: ?>
-                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="unapprove"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="btn-action btn-unapprove">↩️ Unapprove</button></form>
+                    <span class="badge badge-pending">⏳ Pending</span>
+                <?php endif; ?>
+            </div>
+
+            <!-- Body: comment + rating chips -->
+            <div class="post-body">
+                <?php if (trim((string)$r['comment']) !== ''): ?>
+                    <div class="post-comment">"<?= e($r['comment']) ?>"</div>
+                <?php else: ?>
+                    <div class="post-comment empty">No comment written.</div>
+                <?php endif; ?>
+
+                <div class="rating-strip">
+                    <div class="r-chip">
+                        <span class="rl">Teaching</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_teaching']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Workload</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_workload']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Grading</span>
+                        <span class="rs"><?= starDisplay((float)$r['rating_grading']) ?></span>
+                    </div>
+                    <div class="r-chip">
+                        <span class="rl">Overall</span>
+                        <span class="rs"><?= starDisplay($overall) ?></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submitter meta -->
+            <div class="post-extra-meta">
+                <span>🆔 <strong><?= e($r['student_id']) ?></strong> (<?= e($r['student_name']) ?>)</span>
+                <span>🎓 <strong><?= semesterLabel((int)$r['semester_taken']) ?></strong></span>
+            </div>
+
+            <!-- Moderation actions -->
+            <div class="post-actions">
+                <?php if (!$r['is_approved']): ?>
+                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="act-btn act-approve">✅ Approve</button></form>
+                <?php else: ?>
+                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="unapprove"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="act-btn act-unapprove">↩️ Unapprove</button></form>
                 <?php endif; ?>
                 <?php if (!$r['is_flagged']): ?>
-                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="flag"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="btn-action btn-flag">🚩 Flag</button></form>
+                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="flag"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="act-btn act-flag">🚩 Flag</button></form>
                 <?php else: ?>
-                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="unflag"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="btn-action btn-unflag">✅ Unflag</button></form>
+                    <form method="POST"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="unflag"><input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button type="submit" class="act-btn act-unflag">✅ Unflag</button></form>
                 <?php endif; ?>
-                <form method="POST" onsubmit="return confirm('Delete this review permanently?');" style="margin-left:auto;">
+                <form method="POST" onsubmit="return confirm('Delete this review permanently?');">
                     <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="review_id" value="<?= (int)$r['id'] ?>">
                     <input type="hidden" name="filter" value="<?= e($filter) ?>">
-                    <button type="submit" class="btn-action btn-delete">🗑️ Delete</button>
+                    <button type="submit" class="act-btn act-delete">🗑️ Delete</button>
                 </form>
             </div>
+
         </div>
         <?php endforeach; ?>
 

@@ -165,7 +165,7 @@ navbarHeader('Admin Accounts', '');
 
     /* ── Admin cards ── */
     .admin-list { display: flex; flex-direction: column; gap: 10px; }
-    .admin-card { background: var(--fr-card); border-radius: var(--fr-radius); box-shadow: var(--fr-shadow); padding: 14px 16px; display: flex; align-items: center; gap: 13px; }
+    .admin-card { padding: 14px 16px; display: flex; align-items: center; gap: 13px; }
     .a-avatar { width: 44px; height: 44px; border-radius: 50%; background: #7C3AED; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 800; color: #fff; flex-shrink: 0; }
     .a-avatar.you { background: var(--fr-brand); }
     .a-info { flex: 1; min-width: 0; }
@@ -229,7 +229,7 @@ navbarHeader('Admin Accounts', '');
                 if (strlen($initials) >= 2) break;
             }
         ?>
-        <div class="admin-card" id="acard-<?= (int)$a['id'] ?>">
+        <div class="admin-card fr-card" id="acard-<?= (int)$a['id'] ?>">
             <div class="a-avatar <?= $isYou ? 'you' : '' ?>"><?= e($initials ?: '?') ?></div>
             <div class="a-info">
                 <div class="a-name">

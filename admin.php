@@ -2,6 +2,8 @@
 // ============================================================
 //  FacultyReview — admin.php
 //  Admin dashboard: live stats overview + quick action links.
+//  Profile hero now matches the student dashboard.php for visual
+//  consistency across the app.
 // ============================================================
 require_once 'db.php';
 requireAdmin();
@@ -10,11 +12,14 @@ require_once 'navbar.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 $adminName = $_SESSION['user_name'] ?? 'Admin';
+$adminRole = $_SESSION['user_role'] ?? 'admin';
 
 // ── Live stats ──
 $stats = [];
 $res = $mysqli->query("SELECT COUNT(*) AS n FROM users WHERE role = 'student'");
 $stats['students'] = (int)$res->fetch_assoc()['n'];
+$res = $mysqli->query("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'");
+$stats['admins'] = (int)$res->fetch_assoc()['n'];
 $res = $mysqli->query("SELECT COUNT(*) AS n FROM teachers");
 $stats['teachers'] = (int)$res->fetch_assoc()['n'];
 $res = $mysqli->query("SELECT COUNT(*) AS n FROM courses");
@@ -72,15 +77,31 @@ navbarHeader('Admin Dashboard', 'home');
 ?>
 
 <style>
-    /* ── Greeting ── */
-    .greeting { margin-bottom: 18px; }
-    .greeting-title { font-size: 1.3rem; font-weight: 800; color: var(--text); margin-bottom: 4px; }
-    .greeting-sub { font-size: 0.83rem; color: var(--muted); }
-    .active-session-badge {
-        display: inline-flex; align-items: center; gap: 5px;
-        background: #F0FDF4; color: #166534;
-        border: 1px solid #BBF7D0; border-radius: 20px;
-        padding: 4px 11px; font-size: 0.73rem; font-weight: 700; margin-top: 8px;
+    /* ── Profile hero (matches student dashboard.php) ── */
+    .profile-card {
+        background: linear-gradient(135deg, var(--brand) 0%, #7C3AED 100%);
+        border-radius: var(--radius);
+        padding: 20px 18px;
+        color: #fff;
+        margin-bottom: 14px;
+        display: flex; align-items: center; gap: 14px;
+    }
+    .profile-avatar {
+        width: 52px; height: 52px; border-radius: 50%;
+        background: rgba(255,255,255,.2);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.4rem; font-weight: 800;
+        flex-shrink: 0; border: 2px solid rgba(255,255,255,.4);
+    }
+    .profile-info { flex: 1; min-width: 0; }
+    .profile-name  { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; }
+    .profile-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pchip {
+        background: rgba(255,255,255,.18);
+        border-radius: 20px; padding: 3px 10px;
+        font-size: 0.72rem; font-weight: 600;
+        border: 1px solid rgba(255,255,255,.25);
+        white-space: nowrap;
     }
 
     /* ── Alert banner ── */
@@ -139,6 +160,8 @@ navbarHeader('Admin Dashboard', 'home');
     .theme-yellow .stat-num  { color: #A16207; }
     .theme-purple .stat-icon { background: #F5F3FF; }
     .theme-purple .stat-num  { color: #7C3AED; }
+    .theme-teal   .stat-icon { background: #F0FDFA; }
+    .theme-teal   .stat-num  { color: #0D9488; }
 
     /* ── Quick actions ── */
     .actions-grid {
@@ -205,11 +228,17 @@ navbarHeader('Admin Dashboard', 'home');
 
 <div class="fr-container" style="max-width:700px;">
 
-    <!-- Greeting -->
-    <div class="greeting">
-        <div class="greeting-title">Welcome back, <?= e(explode(' ', $adminName)[0]) ?> 👋</div>
-        <div class="greeting-sub">Here's what's happening on FacultyReview today.</div>
-        <div class="active-session-badge">🟢 Active session: <?= e($activeSession) ?></div>
+    <!-- Profile hero (same visual language as student dashboard.php) -->
+    <div class="profile-card">
+        <div class="profile-avatar"><?= e(strtoupper(substr($adminName, 0, 1))) ?></div>
+        <div class="profile-info">
+            <div class="profile-name">Welcome back, <?= e(explode(' ', $adminName)[0]) ?> 👋</div>
+            <div class="profile-chips">
+                <span class="pchip">🛡️ <?= e(ucfirst($adminRole)) ?></span>
+                <span class="pchip">🟢 <?= e($activeSession) ?></span>
+                <span class="pchip">🖥️ CSE</span>
+            </div>
+        </div>
     </div>
 
     <!-- Pending alert -->
@@ -297,7 +326,7 @@ navbarHeader('Admin Dashboard', 'home');
         <a href="admin_teachers.php" class="action-card"><div class="action-icon">👨‍🏫</div><div class="action-body"><div class="action-title">Teachers</div><div class="action-sub">Manage faculty profiles</div></div><span class="action-arrow">›</span></a>
         <a href="admin_sessions.php" class="action-card"><div class="action-icon">📅</div><div class="action-body"><div class="action-title">Sessions</div><div class="action-sub">Set the active semester</div></div><span class="action-arrow">›</span></a>
         <a href="admin_students.php" class="action-card"><div class="action-icon">🎓</div><div class="action-body"><div class="action-title">Students</div><div class="action-sub">View registered users</div></div><span class="action-arrow">›</span></a>
-        <a href="index.php" class="action-card" target="_blank"><div class="action-icon">🌐</div><div class="action-body"><div class="action-title">Public Site</div><div class="action-sub">Preview the landing page</div></div><span class="action-arrow">›</span></a>
+        <a href="admin_users.php" class="action-card"><div class="action-icon">🛡️</div><div class="action-body"><div class="action-title">Manage Admins</div><div class="action-sub">Promote or demote admin users</div></div><span class="action-arrow">›</span></a>
     </div>
 
     <!-- Recent activity -->

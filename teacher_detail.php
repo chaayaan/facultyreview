@@ -402,10 +402,12 @@ navbarHeader($teacher['name'], '', 'search.php', $teacher['designation']);
             // Update stats row
             const statsLeft  = card.querySelector('.reaction-left');
             const statsRight = card.querySelector('.post-stats span:last-child');
-            if (data.helpful_count > 0) {
-                statsLeft.innerHTML = '👍 ' + data.helpful_count + ' found helpful';
-            } else {
-                statsLeft.innerHTML = '<span>No helpful votes yet</span>';
+            if (statsLeft) {
+                if (data.helpful_count > 0) {
+                    statsLeft.innerHTML = '👍 ' + data.helpful_count + ' found helpful';
+                } else {
+                    statsLeft.innerHTML = '<span>No helpful votes yet</span>';
+                }
             }
             if (statsRight) {
                 statsRight.textContent = data.not_helpful_count > 0 ? '👎 ' + data.not_helpful_count + ' not helpful' : '';
