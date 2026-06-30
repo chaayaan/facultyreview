@@ -8,6 +8,18 @@ require_once 'db.php';
 requireLogin();
 require_once 'navbar.php';
 
+function renderStars(float $value, string $size = ''): string {
+    $value = max(0, min(5, $value));
+    $sizeClass = $size ? " $size" : '';
+    $html = "<span class=\"star-rating{$sizeClass}\">";
+    for ($i = 1; $i <= 5; $i++) {
+        $pct = max(0, min(1, $value - ($i - 1))) * 100;
+        $html .= '<span class="star-unit"><span class="star-bg">★</span>'
+               . '<span class="star-fill" style="width:' . $pct . '%">★</span></span>';
+    }
+    return $html . '</span>';
+}
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 $userId = (int)$_SESSION['user_id'];
@@ -216,6 +228,15 @@ navbarHeader($teacher['name'], '', 'search.php', $teacher['designation']);
     .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
     .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
     .empty-text  { font-size: 0.85rem; color: var(--muted); }
+    .star-rating { display: inline-flex; line-height: 1; }
+    .star-unit { position: relative; display: inline-block; width: 1em; }
+    .star-unit .star-bg { color: var(--border); }
+    .star-unit .star-fill {
+        position: absolute; left: 0; top: 0; overflow: hidden;
+        white-space: nowrap; color: var(--warning);
+    }
+    .star-rating.agg-size { font-size: 0.95rem; }
+    .star-rating.chip-size { font-size: 0.62rem; }
 </style>
 
 <div class="fr-container">
@@ -241,19 +262,19 @@ navbarHeader($teacher['name'], '', 'search.php', $teacher['designation']);
         <?php else: ?>
             <div class="agg-row">
                 <span class="agg-label">Overall Rating</span>
-                <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_overall']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_overall'], 1) ?></span></span>
+                <span class="agg-right"><span class="agg-stars"><?= renderStars((float)$agg['avg_overall'], 'agg-size') ?></span><span class="agg-num"><?= number_format((float)$agg['avg_overall'], 1) ?></span></span>
             </div>
             <div class="agg-row">
                 <span class="agg-label">Teaching Quality</span>
-                <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_teaching']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_teaching'], 1) ?></span></span>
+                <span class="agg-right"><span class="agg-stars"><?= renderStars((float)$agg['avg_teaching'], 'agg-size') ?></span><span class="agg-num"><?= number_format((float)$agg['avg_teaching'], 1) ?></span></span>
             </div>
             <div class="agg-row">
                 <span class="agg-label">Workload</span>
-                <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_workload']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_workload'], 1) ?></span></span>
+                <span class="agg-right"><span class="agg-stars"><?= renderStars((float)$agg['avg_workload'], 'agg-size') ?></span><span class="agg-num"><?= number_format((float)$agg['avg_workload'], 1) ?></span></span>
             </div>
             <div class="agg-row">
                 <span class="agg-label">Grading Fairness</span>
-                <span class="agg-right"><span class="agg-stars"><?= starDisplay((float)$agg['avg_grading']) ?></span><span class="agg-num"><?= number_format((float)$agg['avg_grading'], 1) ?></span></span>
+                <span class="agg-right"><span class="agg-stars"><?= renderStars((float)$agg['avg_grading'], 'agg-size') ?></span><span class="agg-num"><?= number_format((float)$agg['avg_grading'], 1) ?></span></span>
             </div>
             <div class="agg-footer">Based on <?= $reviewCount ?> approved review<?= $reviewCount == 1 ? '' : 's' ?></div>
         <?php endif; ?>
@@ -307,15 +328,15 @@ navbarHeader($teacher['name'], '', 'search.php', $teacher['designation']);
                 <div class="rating-strip">
                     <div class="r-chip">
                         <span class="rl">Teaching</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_teaching']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_teaching'], 'chip-size') ?></span>
                     </div>
                     <div class="r-chip">
                         <span class="rl">Workload</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_workload']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_workload'], 'chip-size') ?></span>
                     </div>
                     <div class="r-chip">
                         <span class="rl">Grading</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_grading']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_grading'], 'chip-size') ?></span>
                     </div>
                 </div>
             </div>

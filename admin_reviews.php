@@ -8,6 +8,17 @@
 require_once 'db.php';
 requireAdmin();
 require_once 'navbar.php';
+function renderStars(float $value, string $size = ''): string {
+    $value = max(0, min(5, $value));
+    $sizeClass = $size ? " $size" : '';
+    $html = "<span class=\"star-rating{$sizeClass}\">";
+    for ($i = 1; $i <= 5; $i++) {
+        $pct = max(0, min(1, $value - ($i - 1))) * 100;
+        $html .= '<span class="star-unit"><span class="star-bg">★</span>'
+               . '<span class="star-fill" style="width:' . $pct . '%">★</span></span>';
+    }
+    return $html . '</span>';
+}
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -242,6 +253,15 @@ navbarHeader('Review Moderation', 'reviews');
     .page-btn:hover { border-color: var(--brand); color: var(--brand); }
     .page-btn.active { background: var(--brand); border-color: var(--brand); color: #fff; }
     .page-btn.disabled { opacity: .4; pointer-events: none; }
+
+    .star-rating { display: inline-flex; line-height: 1; }
+    .star-unit { position: relative; display: inline-block; width: 1em; }
+    .star-unit .star-bg { color: var(--border); }
+    .star-unit .star-fill {
+        position: absolute; left: 0; top: 0; overflow: hidden;
+        white-space: nowrap; color: var(--warning);
+    }
+    .star-rating.chip-size { font-size: 0.62rem; }
 </style>
 
 <div class="fr-container" style="max-width:720px;">
@@ -323,19 +343,19 @@ navbarHeader('Review Moderation', 'reviews');
                 <div class="rating-strip">
                     <div class="r-chip">
                         <span class="rl">Teaching</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_teaching']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_teaching'], 'chip-size') ?></span>
                     </div>
                     <div class="r-chip">
                         <span class="rl">Workload</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_workload']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_workload'], 'chip-size') ?></span>
                     </div>
                     <div class="r-chip">
                         <span class="rl">Grading</span>
-                        <span class="rs"><?= starDisplay((float)$r['rating_grading']) ?></span>
+                        <span class="rs"><?= renderStars((float)$r['rating_grading'], 'chip-size') ?></span>
                     </div>
                     <div class="r-chip">
                         <span class="rl">Overall</span>
-                        <span class="rs"><?= starDisplay($overall) ?></span>
+                        <span class="rs"><?= renderStars($overall, 'chip-size') ?></span>
                     </div>
                 </div>
             </div>

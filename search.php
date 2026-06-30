@@ -8,6 +8,18 @@ require_once 'db.php';
 requireLogin();
 require_once 'navbar.php';
 
+function renderStars(float $value, string $size = ''): string {
+    $value = max(0, min(5, $value));
+    $sizeClass = $size ? " $size" : '';
+    $html = "<span class=\"star-rating{$sizeClass}\">";
+    for ($i = 1; $i <= 5; $i++) {
+        $pct = max(0, min(1, $value - ($i - 1))) * 100;
+        $html .= '<span class="star-unit"><span class="star-bg">★</span>'
+               . '<span class="star-fill" style="width:' . $pct . '%">★</span></span>';
+    }
+    return $html . '</span>';
+}
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 $query = trim($_GET['q'] ?? '');
@@ -127,6 +139,16 @@ navbarHeader('Search', 'search');
     .prompt-state { text-align: center; padding: 40px 20px; color: var(--muted); }
     .prompt-emoji { font-size: 2.4rem; margin-bottom: 10px; }
     .prompt-text { font-size: 0.88rem; }
+
+    .star-rating { display: inline-flex; line-height: 1; }
+    .star-unit { position: relative; display: inline-block; width: 1em; }
+    .star-unit .star-bg { color: var(--border); }
+    .star-unit .star-fill {
+        position: absolute; left: 0; top: 0; overflow: hidden;
+        white-space: nowrap; color: var(--warning);
+    }
+    .star-rating.main-size { font-size: 0.9rem; }
+    .star-rating.mini-size { font-size: 0.7rem; }
 </style>
 
 <div class="fr-container">
@@ -174,7 +196,7 @@ navbarHeader('Search', 'search');
                     </div>
                     <div class="course-right">
                         <?php if ($hasReviews): ?>
-                            <span class="stars"><?= starDisplay((float)$c['avg_overall']) ?></span>
+                            <span class="stars"><?= renderStars((float)$c['avg_overall'], 'main-size') ?></span>
                             <span class="avg-num"><?= number_format((float)$c['avg_overall'], 1) ?></span>
                         <?php else: ?>
                             <span class="no-reviews">No reviews yet</span>
@@ -183,9 +205,9 @@ navbarHeader('Search', 'search');
                 </div>
                 <?php if ($hasReviews): ?>
                 <div class="mini-ratings">
-                    <div class="mini-r"><span class="mini-r-label">Teaching</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_teaching']) ?></span></div>
-                    <div class="mini-r"><span class="mini-r-label">Workload</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_workload']) ?></span></div>
-                    <div class="mini-r"><span class="mini-r-label">Grading</span><span class="mini-r-stars"><?= starDisplay((float)$c['avg_grading']) ?></span></div>
+                <div class="mini-r"><span class="mini-r-label">Teaching</span><span class="mini-r-stars"><?= renderStars((float)$c['avg_teaching'], 'mini-size') ?></span></div>
+                <div class="mini-r"><span class="mini-r-label">Workload</span><span class="mini-r-stars"><?= renderStars((float)$c['avg_workload'], 'mini-size') ?></span></div>
+                <div class="mini-r"><span class="mini-r-label">Grading</span><span class="mini-r-stars"><?= renderStars((float)$c['avg_grading'], 'mini-size') ?></span></div>    
                 </div>
                 <?php endif; ?>
             </a>
@@ -212,7 +234,7 @@ navbarHeader('Search', 'search');
                 </div>
                 <div class="teacher-right">
                     <?php if ($hasReviews): ?>
-                        <span class="stars"><?= starDisplay((float)$t['avg_overall']) ?></span>
+                        <span class="stars"><?= renderStars((float)$t['avg_overall'], 'main-size') ?></span>
                         <span class="avg-num"><?= number_format((float)$t['avg_overall'], 1) ?> · <?= (int)$t['review_count'] ?> review<?= $t['review_count'] == 1 ? '' : 's' ?></span>
                     <?php else: ?>
                         <span class="no-reviews">No reviews yet</span>
