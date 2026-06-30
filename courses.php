@@ -7,6 +7,18 @@ require_once 'db.php';
 requireLogin();
 require_once 'navbar.php';
 
+function renderStars(float $value, string $size = ''): string {
+    $value = max(0, min(5, $value));
+    $sizeClass = $size ? " $size" : '';
+    $html = "<span class=\"star-rating{$sizeClass}\">";
+    for ($i = 1; $i <= 5; $i++) {
+        $pct = max(0, min(1, $value - ($i - 1))) * 100;
+        $html .= '<span class="star-unit"><span class="star-bg">★</span>'
+               . '<span class="star-fill" style="width:' . $pct . '%">★</span></span>';
+    }
+    return $html . '</span>';
+}
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 $userName  = $_SESSION['user_name'];
@@ -119,6 +131,16 @@ navbarHeader('Courses', 'courses');
     .empty-state { background: var(--card); border-radius: var(--radius); padding: 36px 20px; text-align: center; box-shadow: var(--shadow); }
     .empty-emoji { font-size: 2rem; margin-bottom: 8px; }
     .empty-text  { font-size: 0.85rem; color: var(--muted); }
+
+    .star-rating { display: inline-flex; line-height: 1; }
+    .star-unit { position: relative; display: inline-block; width: 1em; }
+    .star-unit .star-bg { color: var(--border); }
+    .star-unit .star-fill {
+        position: absolute; left: 0; top: 0; overflow: hidden;
+        white-space: nowrap; color: var(--warning);
+    }
+    .star-rating.main-size { font-size: 0.9rem; }
+    .star-rating.mini-size { font-size: 0.7rem; }
 </style>
 
 <div class="fr-container">
@@ -183,16 +205,16 @@ function renderCourseCard(array $c): string {
     $href = 'course_detail.php?id=' . (int)$c['id'];
 
     $starsHtml = $hasReviews
-        ? '<span class="stars">' . starDisplay((float)$c['avg_overall']) . '</span>
+        ? '<span class="stars">' . renderStars((float)$c['avg_overall'], 'main-size') . '</span>
            <span class="avg-num">' . number_format((float)$c['avg_overall'], 1) . '</span>
            <span class="review-count">' . (int)$c['review_count'] . ' review' . ($c['review_count'] == 1 ? '' : 's') . '</span>'
         : '<span class="no-reviews">No reviews yet</span>';
 
     $miniRatings = $hasReviews
         ? '<div class="mini-ratings">
-            <div class="mini-r"><span class="mini-r-label">Teaching</span><span class="mini-r-stars">' . starDisplay((float)$c['avg_teaching']) . '</span></div>
-            <div class="mini-r"><span class="mini-r-label">Workload</span><span class="mini-r-stars">' . starDisplay((float)$c['avg_workload']) . '</span></div>
-            <div class="mini-r"><span class="mini-r-label">Grading</span><span class="mini-r-stars">' . starDisplay((float)$c['avg_grading']) . '</span></div>
+            <div class="mini-r"><span class="mini-r-label">Teaching</span><span class="mini-r-stars">' . renderStars((float)$c['avg_teaching'], 'mini-size') . '</span></div>
+            <div class="mini-r"><span class="mini-r-label">Workload</span><span class="mini-r-stars">' . renderStars((float)$c['avg_workload'], 'mini-size') . '</span></div>
+            <div class="mini-r"><span class="mini-r-label">Grading</span><span class="mini-r-stars">' . renderStars((float)$c['avg_grading'], 'mini-size') . '</span></div>
            </div>'
         : '';
 
@@ -209,4 +231,5 @@ function renderCourseCard(array $c): string {
         ' . $miniRatings . '
     </a>';
 }
+
 ?>
