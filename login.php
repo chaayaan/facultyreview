@@ -109,6 +109,9 @@ navbarPublicHeader('Login');
                 <input type="password" id="password" name="password" placeholder="Your password" autocomplete="current-password" required>
                 <button type="button" class="pw-toggle" id="togglePw">👁️</button>
             </div>
+            <div style="text-align:right; margin-top:6px;">
+                <a href="forgot_password.php" style="font-size:0.8rem; color:var(--brand); font-weight:600; text-decoration:none;">Forgot password?</a>
+            </div>
         </div>
 
         <button type="submit" class="login-btn" id="submitBtn">Sign In</button>

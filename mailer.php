@@ -2,13 +2,12 @@
 // ============================================================
 //  FacultyReview — mailer.php
 //  Raw SMTP sender (SSL port 465, no library needed)
-//  Same approach as daily_report.php
 // ============================================================
 
-$smtpHost = 'mail.rajaiswari.com';
-$smtpUser = 'noreply@rajaiswari.com';
-$smtpPass = 'please confirm password';                   // ← your cPanel email password
-$mailFrom = 'noreply@rajaiswari.com';
+$smtpHost = 'mail.yor_domain.com';
+$smtpUser = 'noreply@your_domain.com';
+$smtpPass = 'please confirm password of the email you using';                   // ← your cPanel email password
+$mailFrom = 'noreply@your_domain.com';
 
 // ---- Low-level SMTP helpers ----
 // Named _fr to avoid "cannot redeclare" if daily_report.php is ever included together
